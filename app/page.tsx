@@ -1,69 +1,200 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Navbar } from '@/components/Navbar';
+import { DashboardView } from '@/components/DashboardView';
+import { CounterpartiesView } from '@/components/CounterpartiesView';
+import { CommitmentsView } from '@/components/CommitmentsView';
+import { DecisionView } from '@/components/DecisionView';
+import { MemoryView } from '@/components/MemoryView';
+import { DemoView } from '@/components/DemoView';
+import { CreateCommitmentModal } from '@/components/CreateCommitmentModal';
+import { RecordOutcomeModal } from '@/components/RecordOutcomeModal';
+import { Counterparty, Commitment, Outcome, SibylJournalEvent } from '@/lib/types';
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [sessionId, setSessionId] = useState(`sess_${Math.random().toString(36).slice(2, 8)}`);
+  const [sibylStatus, setSibylStatus] = useState<any>(null);
+
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [commitments, setCommitments] = useState<Commitment[]>([]);
+  const [outcomes, setOutcomes] = useState<Outcome[]>([]);
+  const [journalEvents, setJournalEvents] = useState<SibylJournalEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Modals state
+  const [isCreateCommitmentOpen, setIsCreateCommitmentOpen] = useState(false);
+  const [selectedCommitmentForOutcome, setSelectedCommitmentForOutcome] = useState<Commitment | null>(null);
+  const [evalCandidatePrefill, setEvalCandidatePrefill] = useState('ResearchAgent-A');
+
+  const handleFreshSession = () => {
+    const newSess = `sess_${Math.random().toString(36).slice(2, 8)}`;
+    setSessionId(newSess);
+  };
+
+  const fetchAllData = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch counterparties
+      const cpRes = await fetch('/api/counterparties');
+      const cpData = await cpRes.json();
+      if (cpData.success) {
+        setCounterparties(cpData.counterparties || []);
+      }
+
+      // 2. Fetch commitments
+      const commRes = await fetch('/api/commitments');
+      const commData = await commRes.json();
+      if (commData.success) {
+        setCommitments(commData.commitments || []);
+      }
+
+      // 3. Fetch outcomes
+      const outRes = await fetch('/api/outcomes');
+      const outData = await outRes.json();
+      if (outData.success) {
+        setOutcomes(outData.outcomes || []);
+      }
+
+      // 4. Fetch memory status & journal
+      const memRes = await fetch('/api/memory');
+      const memData = await memRes.json();
+      if (memData.success) {
+        setSibylStatus(memData.status || null);
+        setJournalEvents(memData.journalEvents || []);
+      }
+    } catch (err) {
+      console.error('Error fetching PACT data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSeedDemoData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/demo/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'seed' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchAllData();
+      }
+    } catch (err) {
+      console.error('Seed demo error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  const handleOpenEvaluate = (candidateName?: string) => {
+    if (candidateName) {
+      setEvalCandidatePrefill(candidateName);
+    }
+    setActiveTab('decision');
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <div className="min-h-screen flex flex-col bg-[#09090b] text-[#f4f4f5]">
+      {/* Navigation */}
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        sessionId={sessionId}
+        onFreshSession={handleFreshSession}
+        sibylStatus={sibylStatus}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {activeTab === 'dashboard' && (
+          <DashboardView
+            counterparties={counterparties}
+            commitments={commitments}
+            journalEvents={journalEvents}
+            onNavigate={setActiveTab}
+            onOpenCreateCommitment={() => setIsCreateCommitmentOpen(true)}
+            onOpenEvaluate={handleOpenEvaluate}
+            onSeedDemo={handleSeedDemoData}
+            loading={loading}
+          />
+        )}
+
+        {activeTab === 'counterparties' && (
+          <CounterpartiesView
+            counterparties={counterparties}
+            commitments={commitments}
+            outcomes={outcomes}
+            onOpenEvaluate={handleOpenEvaluate}
+            onOpenCreateCommitment={() => setIsCreateCommitmentOpen(true)}
+            onOpenRecordOutcome={(c) => setSelectedCommitmentForOutcome(c)}
+          />
+        )}
+
+        {activeTab === 'commitments' && (
+          <CommitmentsView
+            commitments={commitments}
+            outcomes={outcomes}
+            onOpenCreateCommitment={() => setIsCreateCommitmentOpen(true)}
+            onOpenRecordOutcome={(c) => setSelectedCommitmentForOutcome(c)}
+          />
+        )}
+
+        {activeTab === 'decision' && (
+          <DecisionView
+            counterparties={counterparties}
+            sessionId={sessionId}
+            onFreshSession={handleFreshSession}
+            prefillCandidate={evalCandidatePrefill}
+          />
+        )}
+
+        {activeTab === 'memory' && <MemoryView sibylStatus={sibylStatus} />}
+
+        {activeTab === 'demo' && (
+          <DemoView
+            sessionId={sessionId}
+            onFreshSession={handleFreshSession}
+            onRefreshAll={fetchAllData}
+          />
+        )}
       </main>
+
+      {/* Modals */}
+      <CreateCommitmentModal
+        isOpen={isCreateCommitmentOpen}
+        onClose={() => setIsCreateCommitmentOpen(false)}
+        counterparties={counterparties}
+        onCommitmentCreated={fetchAllData}
+      />
+
+      <RecordOutcomeModal
+        isOpen={!!selectedCommitmentForOutcome}
+        onClose={() => setSelectedCommitmentForOutcome(null)}
+        commitment={selectedCommitmentForOutcome}
+        onOutcomeRecorded={fetchAllData}
+      />
+
+      {/* Footer */}
+      <footer className="border-t border-zinc-800/80 py-6 bg-[#0c0c0e] text-zinc-500 text-xs font-mono">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div>
+            PACT · Persistent Agent Commitment Tracker · Sibyl Labs Hackathon 2026
+          </div>
+          <div className="flex items-center gap-4">
+            <span>Powered by Sibyl Memory Engine</span>
+            <span>·</span>
+            <span>Base Sepolia Escrow</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

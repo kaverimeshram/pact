@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  Play,
 } from 'lucide-react';
 import { Counterparty, Commitment, SibylJournalEvent } from '@/lib/types';
 import { RiskBadge, StatusBadge } from './Badge';
@@ -59,7 +60,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Persistent reputation for agents that remember who kept their promises.
           </h1>
           <p className="text-sm sm:text-base text-zinc-400 leading-relaxed">
-            PACT gives AI agents persistent memory of counterparty commitments and outcomes, so past behavior changes future economic decisions. Without Sibyl Memory, fresh sessions repeat blind counterparty mistakes.
+            PACT gives agents persistent counterparty memory so past behavior changes future economic decisions. Without Sibyl Memory, fresh sessions repeat blind counterparty mistakes.
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-3">
@@ -71,6 +72,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Cpu className="w-4 h-4" />
               Evaluate Counterparty
               <ArrowRight className="w-4 h-4 text-zinc-600" />
+            </button>
+            <button
+              id="btn-hero-demo"
+              onClick={() => onNavigate('demo')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-all shadow-sm active:scale-95"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              Run Demo
             </button>
             <button
               id="btn-hero-commitment"
@@ -86,7 +95,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/60 font-medium text-xs font-mono transition-all ml-auto"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Load Hackathon Demo Data
+              Load Demo Data
             </button>
           </div>
         </div>
@@ -151,7 +160,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215]">
           <div className="flex items-center justify-between text-zinc-400 mb-2">
-            <span className="text-xs font-mono uppercase tracking-wider">Sibyl Journal Events</span>
+            <span className="text-xs font-mono uppercase tracking-wider">Memory Events</span>
             <Database className="w-4 h-4 text-zinc-500" />
           </div>
           <div className="text-2xl font-bold font-mono text-white">{journalEvents.length}</div>
@@ -192,7 +201,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {counterparties.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-zinc-500">
-                      No counterparties in memory yet. Click "Load Hackathon Demo Data" above.
+                      No counterparties in memory yet. Click "Load Demo Data" above.
                     </td>
                   </tr>
                 ) : (
@@ -247,12 +256,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Sibyl Journal Feed (1 col) */}
+        {/* Compact Recent Activity Feed (1 col) */}
         <div className="rounded-xl border border-zinc-800 bg-[#121215] flex flex-col">
           <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Database className="w-4 h-4 text-emerald-400" />
-              <h2 className="text-base font-semibold text-white">Sibyl Journal Stream</h2>
+              <h2 className="text-base font-semibold text-white">Recent Activity Feed</h2>
             </div>
             <button
               onClick={() => onNavigate('memory')}
@@ -264,39 +273,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="p-4 flex-1 space-y-3 overflow-y-auto max-h-[380px]">
             {journalEvents.length === 0 ? (
-              <div className="text-center py-10 text-zinc-500 text-xs">
-                No Sibyl journal events recorded yet.
+              <div className="text-center py-10 text-zinc-500 text-xs font-mono">
+                No Sibyl activity recorded yet.
               </div>
             ) : (
-              journalEvents.slice(0, 5).map((ev) => (
-                <div
-                  key={ev.id}
-                  className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800/80 text-xs space-y-1.5 font-mono"
-                >
-                  <div className="flex items-center justify-between text-[10px] text-zinc-500">
-                    <span className="text-emerald-400 font-semibold uppercase">
-                      {ev.acted?.action || ev.evaluated?.action || 'JOURNAL_EVENT'}
-                    </span>
-                    <span>{ev.ts ? new Date(ev.ts).toLocaleTimeString() : 'Recent'}</span>
-                  </div>
-                  <div className="text-zinc-300 text-[11px] leading-snug">
-                    {ev.evaluated?.counterparty || ev.evaluated?.candidate ? (
-                      <span>Agent: <strong className="text-white">{ev.evaluated.counterparty || ev.evaluated.candidate}</strong> · </span>
-                    ) : null}
-                    {ev.evaluated?.delayHours !== undefined ? (
-                      <span className="text-orange-400">Delay: {ev.evaluated.delayHours}h · Quality: {ev.evaluated.qualityScore}/10</span>
-                    ) : null}
-                    {ev.acted?.strategy ? (
-                      <span className="text-blue-300">Strategy: {ev.acted.strategy}</span>
-                    ) : null}
-                  </div>
-                  {ev.forward?.recommendation || ev.forward?.enforceTerms ? (
-                    <div className="text-[10px] text-zinc-400 bg-zinc-950/60 p-1.5 rounded border border-zinc-800">
-                      Forward note: {ev.forward?.recommendation || ev.forward?.enforceTerms}
+              journalEvents.slice(0, 6).map((ev) => {
+                const isDecision = ev.acted?.action === 'DECISION_GENERATED' || ev.extra?.category === 'decisions';
+                const agentName = ev.evaluated?.counterparty || ev.evaluated?.candidate || ev.extra?.counterpartyName || 'ResearchAgent-A';
+                return (
+                  <div
+                    key={ev.id}
+                    className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800/90 text-xs space-y-1 font-mono"
+                  >
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className={`px-1.5 py-0.5 rounded font-bold uppercase ${
+                        isDecision
+                          ? 'bg-blue-950 text-blue-400 border border-blue-800/60'
+                          : 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
+                      }`}>
+                        {isDecision ? 'DECISION' : 'MEMORY'}
+                      </span>
+                      <span className="text-zinc-500">{ev.ts ? new Date(ev.ts).toLocaleTimeString() : 'Recent'}</span>
                     </div>
-                  ) : null}
-                </div>
-              ))
+
+                    <div className="text-zinc-200 text-[11px] font-semibold pt-0.5">
+                      {agentName}
+                    </div>
+
+                    <div className="text-zinc-400 text-[11px] leading-snug">
+                      {isDecision
+                        ? `Payment strategy changed to ${ev.acted?.milestoneCount ? `${ev.acted.milestoneCount} milestones` : 'milestones'} (${ev.evaluated?.riskLevel || 'HIGH RISK'})`
+                        : ev.evaluated?.delayHours !== undefined
+                        ? `Outcome persisted (${ev.evaluated.delayHours}h delay, ${ev.evaluated.qualityScore}/10 quality)`
+                        : 'Commitment outcome persisted to Sibyl Memory'}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

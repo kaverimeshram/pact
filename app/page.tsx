@@ -12,9 +12,18 @@ import { CreateCommitmentModal } from '@/components/CreateCommitmentModal';
 import { RecordOutcomeModal } from '@/components/RecordOutcomeModal';
 import { Counterparty, Commitment, Outcome, SibylJournalEvent } from '@/lib/types';
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [sessionId, setSessionId] = useState(`sess_${Math.random().toString(36).slice(2, 8)}`);
+function generateShortSessionId(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = 'Session ';
+  for (let i = 0; i < 4; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+export default function Home({ defaultTab = 'dashboard' }: { defaultTab?: string }) {
+  const [activeTab, setActiveTab] = useState(defaultTab);
+  const [sessionId, setSessionId] = useState(generateShortSessionId());
   const [sibylStatus, setSibylStatus] = useState<any>(null);
 
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
@@ -29,8 +38,15 @@ export default function Home() {
   const [evalCandidatePrefill, setEvalCandidatePrefill] = useState('ResearchAgent-A');
 
   const handleFreshSession = () => {
-    const newSess = `sess_${Math.random().toString(36).slice(2, 8)}`;
+    const newSess = generateShortSessionId();
     setSessionId(newSess);
+  };
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', tab === 'dashboard' ? '/' : `/${tab}`);
+    }
   };
 
   const fetchAllData = async () => {
@@ -98,7 +114,7 @@ export default function Home() {
     if (candidateName) {
       setEvalCandidatePrefill(candidateName);
     }
-    setActiveTab('decision');
+    handleTabChange('decisions');
   };
 
   return (
@@ -106,7 +122,7 @@ export default function Home() {
       {/* Navigation */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleTabChange}
         sessionId={sessionId}
         onFreshSession={handleFreshSession}
         sibylStatus={sibylStatus}
@@ -119,7 +135,7 @@ export default function Home() {
             counterparties={counterparties}
             commitments={commitments}
             journalEvents={journalEvents}
-            onNavigate={setActiveTab}
+            onNavigate={handleTabChange}
             onOpenCreateCommitment={() => setIsCreateCommitmentOpen(true)}
             onOpenEvaluate={handleOpenEvaluate}
             onSeedDemo={handleSeedDemoData}
@@ -147,7 +163,7 @@ export default function Home() {
           />
         )}
 
-        {activeTab === 'decision' && (
+        {(activeTab === 'decisions' || activeTab === 'decision') && (
           <DecisionView
             counterparties={counterparties}
             sessionId={sessionId}

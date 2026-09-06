@@ -2,7 +2,6 @@
 
 import React from 'react';
 import {
-  ShieldAlert,
   Database,
   RefreshCw,
   Layers,
@@ -10,7 +9,7 @@ import {
   FileCheck,
   Cpu,
   Sparkles,
-  Search,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -32,9 +31,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: Layers },
     { id: 'counterparties', label: 'Counterparties', icon: Users },
     { id: 'commitments', label: 'Commitments', icon: FileCheck },
-    { id: 'decision', label: 'Decision Engine', icon: Cpu, highlight: true },
-    { id: 'memory', label: 'Sibyl Memory', icon: Database },
-    { id: 'demo', label: 'Guided Demo', icon: Sparkles },
+    { id: 'memory', label: 'Memory', icon: Database },
+    { id: 'decisions', label: 'Decisions', icon: Cpu, highlight: true },
+    { id: 'demo', label: 'Demo', icon: Sparkles },
   ];
 
   return (
@@ -54,7 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="font-semibold text-lg tracking-tight text-white flex items-center gap-2">
                   PACT
                   <span className="text-[10px] font-mono tracking-normal uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                    v0.1.0
+                    Sibyl 2026
                   </span>
                 </span>
               </div>
@@ -99,7 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Session Indicator & Fresh Session Button */}
-            <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-800">
+            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
               <div className="flex flex-col text-right pr-1">
                 <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider">Current Session</span>
                 <span className="text-xs font-mono text-zinc-300 font-semibold">{sessionId}</span>

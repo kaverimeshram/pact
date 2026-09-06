@@ -11,6 +11,9 @@ import {
   Terminal,
   RefreshCw,
   Sparkles,
+  Cpu,
+  ShieldAlert,
+  Coins,
 } from 'lucide-react';
 import { SibylEntity, SibylJournalEvent, SibylSearchResult } from '@/lib/types';
 
@@ -82,10 +85,10 @@ export const MemoryView: React.FC<MemoryViewProps> = ({ sibylStatus }) => {
         <div>
           <div className="flex items-center gap-2">
             <Database className="w-5 h-5 text-emerald-400" />
-            <h1 className="text-xl font-bold text-white">Sibyl Memory Inspector</h1>
+            <h1 className="text-xl font-bold text-white">Sibyl Memory Architecture</h1>
           </div>
           <p className="text-xs text-zinc-400 mt-1 font-mono">
-            Direct audit log of persistent entities, COLD-tier journal events, and FTS5 search index.
+            Audit log of persistent entities, COLD-tier journal events, and cross-session retrieval flow.
           </p>
         </div>
 
@@ -104,39 +107,108 @@ export const MemoryView: React.FC<MemoryViewProps> = ({ sibylStatus }) => {
         </div>
       </div>
 
-      {/* Memory Flow Architecture Guide */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215] space-y-2">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-blue-400 uppercase">
-            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            1. PERSISTED
-          </div>
-          <h3 className="text-sm font-semibold text-white">Commitments & Outcomes</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Written by Session A to Sibyl's SQLite store: promised deadlines, actual delivery delays, quality scores, and verification notes.
-          </p>
+      {/* Visual Lifecycle Flow: PERSIST → RECALL → DECIDE */}
+      <div className="p-6 rounded-xl border border-zinc-800 bg-[#101014] space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-mono uppercase text-zinc-400 font-bold">
+            Memory Flow: PERSIST → RECALL → DECIDE
+          </span>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+            Cross-Session Proof
+          </span>
         </div>
 
-        <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215] space-y-2">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-amber-400 uppercase">
-            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            2. RECALLED
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Section 1: PERSISTED */}
+          <div className="p-5 rounded-xl border border-blue-900/60 bg-blue-950/20 space-y-3 font-mono text-xs">
+            <div className="flex items-center gap-2 text-blue-400 font-bold uppercase text-xs pb-2 border-b border-blue-900/60">
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+              1. PERSISTED
+            </div>
+            <div className="space-y-2 text-zinc-300">
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Commitment</span>
+                <span className="text-white font-bold">ResearchAgent-A · 24h deadline</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Outcome</span>
+                <span className="text-orange-400 font-bold">Delivered 38h (14h late, 6/10 quality)</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Counterparty State</span>
+                <span className="text-zinc-300">Stored to entities & journal in SQLite DB</span>
+              </div>
+            </div>
+            <div className="text-[10px] text-zinc-500 pt-1">Written during Session A</div>
           </div>
-          <h3 className="text-sm font-semibold text-white">Cross-Session Retrieval</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Queried by Fresh Session B via FTS5 multi-tier search without relying on local JavaScript state or conversation cache.
-          </p>
+
+          {/* Section 2: RECALLED */}
+          <div className="p-5 rounded-xl border border-amber-900/60 bg-amber-950/20 space-y-3 font-mono text-xs">
+            <div className="flex items-center gap-2 text-amber-400 font-bold uppercase text-xs pb-2 border-b border-amber-900/60">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              2. RECALLED
+            </div>
+            <div className="space-y-2 text-zinc-300">
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Previous Commitment</span>
+                <span className="text-zinc-200">Market research report</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Previous Delay & Quality</span>
+                <span className="text-orange-400 font-bold">+14h delay · 6/10 score</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Recalculated Reliability</span>
+                <span className="text-amber-400 font-bold">42/100 (HIGH RISK)</span>
+              </div>
+            </div>
+            <div className="text-[10px] text-zinc-500 pt-1">Recalled in Fresh Session B</div>
+          </div>
+
+          {/* Section 3: USED BY DECISION ENGINE */}
+          <div className="p-5 rounded-xl border border-emerald-900/60 bg-emerald-950/20 space-y-3 font-mono text-xs">
+            <div className="flex items-center gap-2 text-emerald-400 font-bold uppercase text-xs pb-2 border-b border-emerald-900/60">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              3. USED BY DECISION ENGINE
+            </div>
+            <div className="space-y-2 text-zinc-300">
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Risk Classification</span>
+                <span className="text-orange-400 font-bold">HIGH RISK</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Counterparty Evaluation</span>
+                <span className="text-zinc-200">Full upfront payment denied</span>
+              </div>
+              <div className="p-2 rounded bg-zinc-900/90 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] block uppercase">Payment Strategy</span>
+                <span className="text-emerald-400 font-bold">3 MILESTONES ($10 / $20 / $20)</span>
+              </div>
+            </div>
+            <div className="text-[10px] text-zinc-500 pt-1">Enforced on new $50 task</div>
+          </div>
         </div>
 
-        <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215] space-y-2">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-emerald-400 uppercase">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            3. USED FOR
+        {/* Visual Session Indicator */}
+        <div className="p-4 rounded-lg bg-zinc-900/90 border border-zinc-800 font-mono text-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-bold">
+              Session A
+            </span>
+            <span className="text-zinc-400">Writes commitment and outcome</span>
           </div>
-          <h3 className="text-sm font-semibold text-white">Reputation & Decisions</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Feeds the deterministic reputation engine to downgrade high-risk agents and enforce 3-stage milestone escrow disbursements.
-          </p>
+          <ArrowRight className="w-4 h-4 text-zinc-600 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span className="text-white font-bold">SIBYL MEMORY (Persistent SQLite FTS5)</span>
+          </div>
+          <ArrowRight className="w-4 h-4 text-zinc-600 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-bold">
+              Fresh Session B
+            </span>
+            <span className="text-zinc-400">Recalls history & changes decision</span>
+          </div>
         </div>
       </div>
 

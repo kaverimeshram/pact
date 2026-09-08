@@ -5,7 +5,7 @@ import { listCommitments, persistCommitment } from '@/lib/memory/sibyl';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { commitmentId, counterpartyName, budget, strategy } = body;
+    const { commitmentId, counterpartyName, budget, strategy, milestones } = body;
 
     if (!commitmentId || !counterpartyName) {
       return NextResponse.json(
@@ -19,6 +19,7 @@ export async function POST(req: Request) {
       counterpartyName,
       budgetEthOrUsd: Number(budget || 50),
       strategy: strategy || 'MILESTONE_3',
+      milestones,
     });
 
     if (result.txHash) {

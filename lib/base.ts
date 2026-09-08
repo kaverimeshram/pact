@@ -1,13 +1,20 @@
 import { createPublicClient, createWalletClient, http, parseEther, isHex, stringToHex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import {
+  PACT_ESCROW_ABI,
+  getEscrowContractAddress,
+  formatBaseScanTxUrl,
+  DEMO_AGENT_WALLETS,
+} from './contracts/pactEscrow';
 
 export interface BaseEscrowResult {
   success: boolean;
   txHash?: string;
   explorerUrl?: string;
   blockNumber?: bigint;
-  status: 'BROADCASTED' | 'SIMULATED' | 'ENV_KEY_MISSING';
+  contractAddress?: string;
+  status: 'BROADCASTED' | 'SIMULATED' | 'ENV_KEY_MISSING' | 'ERROR';
   message: string;
 }
 
@@ -20,9 +27,11 @@ export async function executeBaseEscrowCommitment(params: {
   counterpartyName: string;
   budgetEthOrUsd: number;
   strategy: string;
+  milestones?: { amount: number; percentage: number }[];
 }): Promise<BaseEscrowResult> {
-  const rpcUrl = process.env.BASE_RPC_URL || 'https://sepolia.base.org';
+  const rpcUrl = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://sepolia.base.org';
   const privateKey = process.env.BASE_PRIVATE_KEY;
+  const contractAddress = getEscrowContractAddress();
 
   const publicClient = createPublicClient({
     chain: baseSepolia,
@@ -30,19 +39,11 @@ export async function executeBaseEscrowCommitment(params: {
   });
 
   if (!privateKey || !isHex(privateKey)) {
-    // Return explicit state indicating Base RPC client is configured and waiting for wallet key
-    const mockCommitmentPayload = JSON.stringify({
-      commitmentId: params.commitmentId,
-      counterparty: params.counterpartyName,
-      strategy: params.strategy,
-      timestamp: Date.now(),
-    });
-
     return {
       success: true,
       status: 'ENV_KEY_MISSING',
       message:
-        'Base Sepolia client is active. To broadcast live on-chain escrow transactions, set BASE_PRIVATE_KEY in .env.local.',
+        'Base Sepolia RPC is active. To broadcast on-chain escrow transactions from server, set BASE_PRIVATE_KEY in .env.local, or connect your browser wallet.',
     };
   }
 
@@ -54,7 +55,38 @@ export async function executeBaseEscrowCommitment(params: {
       transport: http(rpcUrl),
     });
 
-    // Create commitment attestation memo in data field
+    // If PACTEscrow contract is deployed, call createEscrow
+    if (contractAddress) {
+      const beneficiary =
+        DEMO_AGENT_WALLETS[params.counterpartyName] || DEMO_AGENT_WALLETS['ResearchAgent-A'];
+
+      const milestoneAmounts = (params.milestones || [
+        { amount: 10, percentage: 20 },
+        { amount: 20, percentage: 40 },
+        { amount: 20, percentage: 40 },
+      ]).map((m) => parseEther((m.amount * 0.000002).toFixed(6)));
+
+      const totalWei = milestoneAmounts.reduce((a, b) => a + b, BigInt(0));
+
+      const hash = await walletClient.writeContract({
+        address: contractAddress,
+        abi: PACT_ESCROW_ABI,
+        functionName: 'createEscrow',
+        args: [beneficiary, milestoneAmounts, params.commitmentId, params.counterpartyName],
+        value: totalWei,
+      });
+
+      return {
+        success: true,
+        txHash: hash,
+        explorerUrl: formatBaseScanTxUrl(hash),
+        contractAddress,
+        status: 'BROADCASTED',
+        message: `Escrow created on PACTEscrow contract at ${contractAddress}`,
+      };
+    }
+
+    // Fallback: Create commitment attestation transaction
     const commitmentData = stringToHex(
       JSON.stringify({
         app: 'PACT',
@@ -64,9 +96,8 @@ export async function executeBaseEscrowCommitment(params: {
       })
     );
 
-    // Send a 0.0001 ETH escrow or self-attestation on Base Sepolia
     const hash = await walletClient.sendTransaction({
-      to: account.address, // Self-attestation or escrow target
+      to: account.address,
       value: parseEther('0.0001'),
       data: commitmentData,
     });
@@ -74,16 +105,17 @@ export async function executeBaseEscrowCommitment(params: {
     return {
       success: true,
       txHash: hash,
-      explorerUrl: `https://sepolia.basescan.org/tx/${hash}`,
+      explorerUrl: formatBaseScanTxUrl(hash),
       status: 'BROADCASTED',
-      message: `Escrow commitment broadcasted on Base Sepolia: ${hash}`,
+      message: `Escrow commitment recorded on Base Sepolia: ${hash}`,
     };
   } catch (err: any) {
     console.error('Base Sepolia transaction error:', err);
     return {
       success: false,
-      status: 'SIMULATED',
+      status: 'ERROR',
       message: `Base Sepolia transaction failed: ${err.message}`,
     };
   }
 }
+

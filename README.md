@@ -1,6 +1,6 @@
 # PACT: Persistent Agent Commitment Tracker
 
-> **A memory-backed reputation system for AI agents powered by Sibyl Memory.**
+> **A memory-backed reputation system for AI agents powered by Sibyl Memory & Base Sepolia Escrow.**
 
 Built for the **Sibyl Labs Hackathon 2026**.
 
@@ -8,7 +8,7 @@ Built for the **Sibyl Labs Hackathon 2026**.
 
 ## What it does
 
-**PACT** tracks AI agent commitments, deadlines, and delivery outcomes in persistent long-term storage (**Sibyl Memory**). It ensures that past performance (e.g. delivery delays, quality scores, broken promises, or dispute records) directly changes future economic decisions (such as requiring milestone payments and withholding upfront disbursements for high-risk counterparties) across fresh, decoupled agent sessions.
+**PACT** tracks AI agent commitments, deadlines, and delivery outcomes in persistent long-term storage (**Sibyl Memory**). It ensures that past performance (such as delivery delays, quality scores, broken promises, or dispute records) directly changes future economic decisions (such as requiring milestone payments and withholding upfront disbursements for high-risk counterparties) and enforces them through on-chain escrow contracts on **Base Sepolia**.
 
 ---
 
@@ -22,15 +22,16 @@ Autonomous AI agents frequently hire and negotiate with other AI agents or autom
 
 ---
 
-## The Solution
+## The Solution & Causal Chain
 
-PACT connects agent negotiations to **Sibyl Memory**:
+PACT connects agent negotiations to **Sibyl Memory** and enforces terms on **Base Sepolia**:
 
 - **Session A**: Records promised deadlines and logs the actual outcome (e.g. 14 hours late, 6/10 quality score) into Sibyl Memory.
 - **Persistent Storage**: Sibyl persists both structured entities (`counterparties`, `commitments`, `outcomes`) and COLD-tier journal events in SQLite FTS5 store (`~/.sibyl-memory/memory.db`).
-- **Fresh Session B**: A brand-new session with **zero local conversational state** queries Sibyl Memory, recalls the counterparty's historical delay and quality score, deterministic mathematical scoring calculates reliability at **42/100 (HIGH RISK)**, and PACT enforces **3 milestone payments with 0% full upfront disbursement** on new tasks.
+- **Fresh Session B**: A brand-new session with **zero local conversational state** queries Sibyl Memory, recalls the counterparty's historical delay and quality score, deterministic mathematical scoring calculates reliability at **42/100 (HIGH RISK)**.
+- **Base Sepolia Escrow**: PACT enforces a **3-Milestone Escrow Payment Plan** ($10 upfront / 20%, $20 checkpoint / 40%, $20 final verification / 40%) locked on Base Sepolia.
 
-$$\text{MEMORY} \longrightarrow \text{CHANGES THE DECISION}$$
+$$\text{SIBYL MEMORY} \longrightarrow \text{REPUTATION} \longrightarrow \text{RISK ASSESSMENT} \longrightarrow \text{PAYMENT STRATEGY} \longrightarrow \text{BASE SEPOLIA ESCROW}$$
 
 ---
 
@@ -56,9 +57,9 @@ User / Agent Task Request
            ↓
    Decision Engine (lib/decision-engine.ts)
            ↓
-  Payment Strategy (e.g. 3 Milestones / Escrow)
+  Payment Strategy (e.g. 3 Milestones: $10 / $20 / $20)
            ↓
-Contract Execution & Base Escrow (lib/base.ts)
+  Base Sepolia Escrow (contracts/PACTEscrow.sol & lib/wallet.ts)
            ↓
    Delivery Outcome (Delay, Quality, Success)
            ↓
@@ -67,20 +68,18 @@ Contract Execution & Base Escrow (lib/base.ts)
 
 ---
 
-## Memory Implementation
+## Smart Contract Layer (`contracts/PACTEscrow.sol`)
 
-The Sibyl integration is located in:
-
-- **[`scripts/sibyl_bridge.py`](file:///Users/mikasa05/pact/scripts/sibyl_bridge.py)**: Python bridge directly executing the official `sibyl_memory_client.MemoryClient` with local SQLite storage (`~/.sibyl-memory/memory.db`).
-- **[`lib/memory/sibyl.ts`](file:///Users/mikasa05/pact/lib/memory/sibyl.ts)**: Core TypeScript module exposing:
-  - `persistCounterparty(counterparty)`: Writes entity under `counterparties` category.
-  - `persistCommitment(commitment)`: Writes entity under `commitments` category.
-  - `persistOutcome(outcome)`: Writes outcome entity and appends a COLD-tier journal event.
-  - `recallCounterparty(name)`: Exact entity retrieval from Sibyl store.
-  - `recallRelevantHistory(query)`: FTS5 multi-tier search across entities, state, and journal events.
-  - `readJournalEvents(limit)`: Reads sequential journal logs with evaluated/acted/forward payloads.
-- **[`lib/reputation.ts`](file:///Users/mikasa05/pact/lib/reputation.ts)**: Deterministic mathematical scoring engine calculating reliability (0–100), risk tiers (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), and milestone disbursements.
-- **[`lib/decision-engine.ts`](file:///Users/mikasa05/pact/lib/decision-engine.ts)**: Evaluates incoming tasks against recalled memory and outputs structured decisions with causal evidence.
+The escrow smart contract is located in [`contracts/PACTEscrow.sol`](file:///Users/mikasa05/pact/contracts/PACTEscrow.sol):
+- **Network**: Base Sepolia (Chain ID: `84532`)
+- **Native Currency**: ETH
+- **Functions**:
+  - `createEscrow(beneficiary, milestoneAmounts, commitmentId, counterpartyName)`: Creates and atomically funds a multi-milestone escrow.
+  - `fundEscrow(escrowId)`: Funds a created escrow.
+  - `releaseMilestone(escrowId, milestoneIndex)`: Payer approves disbursement of a specific milestone to the beneficiary.
+  - `disputeEscrow(escrowId, reason)`: Marks an escrow as disputed.
+  - `getEscrow(escrowId)` & `getMilestones(escrowId)`: View status and milestone flags.
+- **Security**: Checks-Effects-Interactions pattern, non-reentrancy protection, zero-address validation, and double-release prevention.
 
 ---
 
@@ -92,6 +91,7 @@ The Sibyl integration is located in:
 - **Reliability Score**: `42/100`
 - **Risk Level**: `HIGH RISK`
 - **Decision**: **3 MILESTONES** ($10 upfront / 20%, $20 milestone 1 / 40%, $20 final verification / 40%). Full upfront payment denied.
+- **On-Chain Action**: Base Sepolia escrow created locking 3 milestone disbursements.
 
 ### 2. Without Memory (Simulate No Memory / Cold Start)
 - **Candidate**: `ResearchAgent-A`
@@ -102,21 +102,13 @@ The Sibyl integration is located in:
 
 ---
 
-## Base Sepolia Integration
-
-PACT includes an on-chain escrow binding module in **[`lib/base.ts`](file:///Users/mikasa05/pact/lib/base.ts)**:
-- Connects to **Base Sepolia** (`https://sepolia.base.org`).
-- Encodes cryptographic commitment data (`commitmentId`, `counterparty`, `strategy`) in the transaction payload.
-- Returns verified on-chain transaction hashes viewable on [BaseScan Sepolia](https://sepolia.basescan.org/).
-
----
-
 ## Setup & Running Locally
 
 ### Prerequisites
 - Node.js `v20+` (v25 supported)
 - Python `3.10+` (v3.14 supported)
 - `uv` package manager (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- Foundry `forge` (optional, for contract testing: `curl -L https://foundry.paradigm.xyz | bash`)
 
 ### Installation
 
@@ -136,9 +128,13 @@ PACT includes an on-chain escrow binding module in **[`lib/base.ts`](file:///Use
    uv tool install 'sibyl-memory-cli[mcp]'
    ```
 
-4. **Run the Automated Test Suite:**
+4. **Run the Automated Test Suites:**
    ```bash
+   # Runs 17/17 core, memory, and escrow tests
    npm test
+
+   # Runs 8/8 Foundry smart contract tests
+   npm run test:contracts
    ```
 
 5. **Start the Development Server:**
@@ -149,21 +145,28 @@ PACT includes an on-chain escrow binding module in **[`lib/base.ts`](file:///Use
 
 ---
 
-## Environment Variables
+## Base Sepolia Deployment
 
-Copy `.env.example` to `.env.local`:
-```bash
-cp .env.example .env.local
-```
+To deploy the escrow contract to Base Sepolia:
 
-```env
-# Sibyl Memory Database Configuration
-SIBYL_DB_PATH=~/.sibyl-memory/memory.db
+1. Copy `.env.example` to `.env.local` and add your deployment key:
+   ```bash
+   cp .env.example .env.local
+   ```
+   ```env
+   BASE_RPC_URL=https://sepolia.base.org
+   BASE_PRIVATE_KEY=0x...
+   ```
 
-# Base Sepolia Network Configuration (Optional for live on-chain escrow)
-BASE_RPC_URL=https://sepolia.base.org
-BASE_PRIVATE_KEY=
-```
+2. Run the deployment script:
+   ```bash
+   npm run deploy:escrow
+   ```
+
+3. Add the deployed contract address to `.env.local`:
+   ```env
+   NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS=0x...
+   ```
 
 ---
 
@@ -174,13 +177,14 @@ BASE_PRIVATE_KEY=
    - Explain the core premise: AI agents have amnesia across sessions; PACT gives them persistent memory of counterparty commitments.
 2. **Trigger Guided Demo (0:30 - 1:30)**:
    - Navigate to the **Guided Demo** tab.
-   - Click **Step 1**: Creates commitment for `ResearchAgent-A` (24h deadline, 8/10 quality, $50).
+   - Click **Step 1**: Creates commitment for `ResearchAgent-A` (24h deadline, 8/10 quality, $10).
    - Click **Step 2**: Records bad outcome (38h delivery, 14h late, 6/10 quality).
    - Click **Step 4**: Clicks **Start Fresh Session** (demonstrates session ID changing with zero local memory).
-   - Click **Step 6 & 7**: PACT queries Sibyl Memory, recalls the 14h delay, and enforces a **3-Milestone Payment Strategy** ($10 / $20 / $20) with **HIGH RISK (42/100)**.
+   - Click **Step 5 & 6**: PACT queries Sibyl Memory, recalls the 14h delay, and enforces a **3-Milestone Payment Strategy** ($10 / $20 / $20) with **HIGH RISK (42/100)**.
+   - Click **Step 7**: Creates **Base Sepolia Escrow** locking funds in 3 milestone disbursements.
 3. **Simulate No Memory Comparison (1:30 - 2:00)**:
    - Show the side-by-side card comparing the decision **WITH MEMORY** vs **WITHOUT MEMORY**.
-   - Show that without memory, the agent blindly applies standard terms.
+   - Highlight the key insight: *"Persistent memory changes the economic controls applied to the agent."*
 4. **Sibyl Memory Audit (2:00 - 2:30)**:
    - Open **Sibyl Memory** tab.
    - Show raw persisted entities and execute an FTS5 search query (`ResearchAgent-A`) returning matching entities and journal logs directly from `~/.sibyl-memory/memory.db`.

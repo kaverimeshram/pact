@@ -18,9 +18,27 @@ import {
   Split,
   FileText,
   AlertTriangle,
+  Wallet,
+  Check,
+  ShieldCheck,
+  Loader2,
 } from 'lucide-react';
 import { Counterparty, Decision } from '@/lib/types';
 import { RiskBadge, StrategyBadge } from './Badge';
+import {
+  connectInjectedWallet,
+  createBaseSepoliaEscrowTx,
+  releaseBaseSepoliaMilestoneTx,
+  hasInjectedWallet,
+  TxStepState,
+} from '@/lib/wallet';
+import {
+  getEscrowContractAddress,
+  DEMO_AGENT_WALLETS,
+  DEFAULT_BASE_SEPOLIA_CHAIN_ID,
+  formatBaseScanTxUrl,
+  formatBaseScanAddressUrl,
+} from '@/lib/contracts/pactEscrow';
 
 interface DecisionViewProps {
   counterparties: Counterparty[];
@@ -47,13 +65,59 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
   const [coldStartDecision, setColdStartDecision] = useState<Decision | null>(null);
   const [showComparison, setShowComparison] = useState(false);
 
-  const [baseLoading, setBaseLoading] = useState(false);
-  const [baseResult, setBaseResult] = useState<any | null>(null);
+  // Web3 Wallet & Base Sepolia Escrow States
+  const [walletAddress, setWalletAddress] = useState<`0x${string}` | null>(null);
+  const [walletChainId, setWalletChainId] = useState<number | null>(null);
+  const [isWalletConnecting, setIsWalletConnecting] = useState(false);
+
+  const [txStep, setTxStep] = useState<TxStepState>('IDLE');
+  const [txStatusMessage, setTxStatusMessage] = useState<string>('');
+  const [confirmedTxHash, setConfirmedTxHash] = useState<string | null>(null);
+  const [confirmedExplorerUrl, setConfirmedExplorerUrl] = useState<string | null>(null);
+  const [escrowError, setEscrowError] = useState<string | null>(null);
+
+  const [releasedMilestones, setReleasedMilestones] = useState<Record<number, boolean>>({});
+  const [releasingMilestoneIdx, setReleasingMilestoneIdx] = useState<number | null>(null);
+
+  const contractAddress = getEscrowContractAddress();
+  const beneficiaryWallet =
+    DEMO_AGENT_WALLETS[candidateName] || DEMO_AGENT_WALLETS['ResearchAgent-A'];
+
+  // Check initial wallet connection if available
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      (window as any).ethereum
+        .request({ method: 'eth_accounts' })
+        .then((accounts: string[]) => {
+          if (accounts && accounts.length > 0) {
+            setWalletAddress(accounts[0] as `0x${string}`);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleConnectWallet = async () => {
+    setIsWalletConnecting(true);
+    setEscrowError(null);
+    try {
+      const res = await connectInjectedWallet();
+      setWalletAddress(res.address);
+      setWalletChainId(res.chainId);
+    } catch (err: any) {
+      setEscrowError(err.message || 'Failed to connect wallet');
+    } finally {
+      setIsWalletConnecting(false);
+    }
+  };
 
   const handleEvaluate = async (simulateOff = false) => {
     setLoading(true);
     setErrorMessage(null);
-    setBaseResult(null);
+    setConfirmedTxHash(null);
+    setConfirmedExplorerUrl(null);
+    setEscrowError(null);
+    setTxStep('IDLE');
 
     // Dynamic progressive loading status
     setLoadingPhase('Loading Sibyl Memory...');
@@ -97,37 +161,98 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
   };
 
   const handleRunWithoutMemory = async () => {
-    // 1. Run with memory first if not already run
     if (!decision || decision.memorySimulatedOff) {
       await handleEvaluate(false);
     }
-    // 2. Run without memory for side-by-side comparison
     await handleEvaluate(true);
   };
 
-  const handleTriggerBaseEscrow = async () => {
+  const handleCreateOnChainEscrow = async () => {
     if (!decision) return;
-    setBaseLoading(true);
+    setEscrowError(null);
+    setConfirmedTxHash(null);
+    setConfirmedExplorerUrl(null);
+
+    // If no browser wallet installed or user wants server-backed creation
+    if (!hasInjectedWallet()) {
+      setTxStep('AWAITING_APPROVAL');
+      setTxStatusMessage('Broadcasting via Base Sepolia RPC...');
+      try {
+        const res = await fetch('/api/base/escrow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commitmentId: `comm-escrow-${Date.now().toString(36)}`,
+            counterpartyName: decision.selectedCounterparty,
+            budget: decision.budget,
+            strategy: decision.paymentStrategy,
+            milestones: decision.milestones,
+          }),
+        });
+        const data = await res.json();
+        if (data.success && data.txHash) {
+          setTxStep('SUCCESS');
+          setConfirmedTxHash(data.txHash);
+          setConfirmedExplorerUrl(data.explorerUrl || formatBaseScanTxUrl(data.txHash));
+          setTxStatusMessage(data.message);
+        } else {
+          setTxStep('ERROR');
+          setEscrowError(data.message || data.error || 'Base Sepolia escrow execution failed');
+        }
+      } catch (err: any) {
+        setTxStep('ERROR');
+        setEscrowError(err.message || 'Base RPC error');
+      }
+      return;
+    }
+
     try {
-      const res = await fetch('/api/base/escrow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          commitmentId: `comm-escrow-${Date.now().toString(36)}`,
-          counterpartyName: decision.selectedCounterparty,
-          budget: decision.budget,
-          strategy: decision.paymentStrategy,
-        }),
+      const result = await createBaseSepoliaEscrowTx({
+        contractAddress: contractAddress || undefined,
+        beneficiaryAddress: beneficiaryWallet,
+        counterpartyName: decision.selectedCounterparty,
+        milestones: decision.milestones,
+        commitmentId: `comm-pact-${Date.now().toString(36)}`,
+        onStatusChange: (step, msg) => {
+          setTxStep(step);
+          setTxStatusMessage(msg);
+        },
       });
-      const data = await res.json();
-      setBaseResult(data);
+
+      setConfirmedTxHash(result.txHash);
+      setConfirmedExplorerUrl(result.explorerUrl);
+      setTxStep('SUCCESS');
+      setTxStatusMessage('Escrow successfully created and funded on Base Sepolia!');
     } catch (err: any) {
-      setBaseResult({
-        success: false,
-        message: err.message || 'Base RPC error',
+      setTxStep('ERROR');
+      setEscrowError(err.message || 'Transaction rejected or failed on Base Sepolia');
+    }
+  };
+
+  const handleReleaseMilestone = async (idx: number) => {
+    if (!contractAddress) {
+      // Mark as locally released for demo preview
+      setReleasedMilestones((prev) => ({ ...prev, [idx]: true }));
+      return;
+    }
+
+    setReleasingMilestoneIdx(idx);
+    try {
+      const result = await releaseBaseSepoliaMilestoneTx({
+        contractAddress,
+        escrowId: 1,
+        milestoneIndex: idx,
+        onStatusChange: (step, msg) => {
+          setTxStatusMessage(msg);
+        },
       });
+      setReleasedMilestones((prev) => ({ ...prev, [idx]: true }));
+      setConfirmedTxHash(result.txHash);
+      setConfirmedExplorerUrl(result.explorerUrl);
+    } catch (err: any) {
+      setEscrowError(`Failed to release milestone: ${err.message}`);
     } finally {
-      setBaseLoading(false);
+      setReleasingMilestoneIdx(null);
     }
   };
 
@@ -141,7 +266,7 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
             <h1 className="text-xl font-bold text-white">PACT Decision Engine</h1>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            Recalls counterparty commitment history from Sibyl Memory to dynamically calculate risk and enforce milestone escrow.
+            Recalls counterparty commitment history from Sibyl Memory to dynamically calculate risk and enforce Base Sepolia milestone escrow.
           </p>
         </div>
 
@@ -156,6 +281,9 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
               setDecision(null);
               setColdStartDecision(null);
               setShowComparison(false);
+              setConfirmedTxHash(null);
+              setConfirmedExplorerUrl(null);
+              setTxStep('IDLE');
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700 transition-colors"
           >
@@ -181,7 +309,7 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-mono text-zinc-400 uppercase">Budget ($ USD / ETH)</label>
+            <label className="text-xs font-mono text-zinc-400 uppercase">Budget ($ USD / ETH Scale)</label>
             <div className="relative">
               <span className="absolute left-3.5 top-2.5 text-zinc-500 font-mono text-sm">$</span>
               <input
@@ -199,185 +327,111 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
           <div className="space-y-1.5">
             <label className="text-xs font-mono text-zinc-400 uppercase">Candidate Agent</label>
             <select
-              id="select-candidate"
+              id="select-decision-candidate"
               value={candidateName}
               onChange={(e) => setCandidateName(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:outline-none focus:border-zinc-500 font-mono"
+              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white font-mono focus:outline-none focus:border-zinc-500"
             >
-              <option value="ResearchAgent-A">ResearchAgent-A (14h late, 6/10 quality)</option>
-              <option value="CodeAuditAgent-X">CodeAuditAgent-X (On-time, 9/10 quality)</option>
-              {counterparties
-                .filter((c) => c.name !== 'ResearchAgent-A' && c.name !== 'CodeAuditAgent-X')
-                .map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name} ({c.reliabilityScore}/100)
-                  </option>
-                ))}
+              {counterparties.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name} — {c.capability} ({c.reliabilityScore}/100)
+                </option>
+              ))}
+              {counterparties.length === 0 && (
+                <option value="ResearchAgent-A">ResearchAgent-A — Market Research</option>
+              )}
             </select>
           </div>
 
-          {/* Simulate No Memory Toggle */}
-          <div className="flex flex-col justify-end">
-            <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-medium text-zinc-200 block">Simulate No Memory / Cold Start</span>
-                <span className="text-[11px] text-zinc-500 block">
-                  Disables Sibyl recall to test how a blind agent decides
-                </span>
-              </div>
-              <button
-                id="toggle-simulate-no-memory"
-                type="button"
-                onClick={() => setSimulateNoMemory(!simulateNoMemory)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                  simulateNoMemory ? 'bg-amber-600' : 'bg-zinc-700'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    simulateNoMemory ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-4 sm:pt-6">
+            <button
+              id="btn-evaluate-memory"
+              onClick={() => handleEvaluate(false)}
+              disabled={loading}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs font-mono transition-all shadow active:scale-95"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              {loading ? loadingPhase || 'Evaluating...' : 'Query Sibyl & Evaluate'}
+            </button>
+
+            <button
+              id="btn-simulate-no-memory"
+              onClick={handleRunWithoutMemory}
+              disabled={loading}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs border border-zinc-700 transition-colors"
+            >
+              <Split className="w-3.5 h-3.5" />
+              Simulate Blind (No Memory)
+            </button>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <button
-            id="btn-run-decision"
-            onClick={() => handleEvaluate(false)}
-            disabled={loading}
-            className="px-6 py-3 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-sm transition-all shadow active:scale-98 flex items-center justify-center gap-2"
-          >
-            <Cpu className="w-4 h-4" />
-            {loading ? loadingPhase || 'Evaluating...' : 'Evaluate Counterparty'}
-          </button>
-
-          <button
-            id="btn-run-without-memory"
-            onClick={handleRunWithoutMemory}
-            disabled={loading}
-            className="px-4 py-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 font-medium text-xs font-mono transition-all flex items-center gap-2"
-          >
-            <Split className="w-4 h-4 text-amber-400" />
-            Run Without Memory (Comparison Mode)
-          </button>
-
-          {loading && (
-            <span className="text-xs font-mono text-zinc-400 flex items-center gap-2 animate-pulse">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
-              {loadingPhase}
-            </span>
-          )}
-        </div>
-
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-300 text-xs font-mono flex items-center gap-2">
+          <div className="p-3 rounded-lg bg-red-950/40 border border-red-800 text-red-300 text-xs font-mono flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
             <span>{errorMessage}</span>
           </div>
         )}
       </div>
 
-      {/* Decision Output Section */}
+      {/* Decision Output & Escrow Interface */}
       {decision && (
         <div className="space-y-6">
-          {/* Prominent Causal Notice: MEMORY CHANGED THIS DECISION */}
-          <div
-            className={`p-6 rounded-xl border ${
-              decision.memorySimulatedOff
-                ? 'bg-zinc-900/80 border-zinc-700 text-zinc-300'
-                : decision.riskLevel === 'HIGH' || decision.riskLevel === 'CRITICAL'
-                ? 'bg-orange-950/40 border-orange-700/80 text-orange-200'
-                : 'bg-emerald-950/40 border-emerald-700/80 text-emerald-200'
-            }`}
-          >
-            <div className="flex items-start gap-3.5">
-              {decision.memorySimulatedOff ? (
-                <AlertOctagon className="w-6 h-6 text-zinc-400 mt-0.5 shrink-0" />
-              ) : decision.riskLevel === 'HIGH' || decision.riskLevel === 'CRITICAL' ? (
-                <ShieldAlert className="w-6 h-6 text-orange-400 mt-0.5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="w-6 h-6 text-emerald-400 mt-0.5 shrink-0" />
-              )}
-              <div className="space-y-1.5">
-                <span className="text-xs font-mono uppercase font-bold tracking-wider block">
-                  {decision.memorySimulatedOff
-                    ? 'COLD START MODE (SIMULATE NO MEMORY)'
-                    : 'MEMORY CHANGED THIS DECISION'}
-                </span>
-                <p className="text-base font-semibold leading-snug">
-                  {decision.reasoning}
-                </p>
-                <div className="text-xs font-mono text-zinc-400 pt-1">
-                  <strong>WHY?</strong> Previous delivery was 14 hours late and scored 6/10. High counterparty risk prevents full upfront payment.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Three-Column Decision Architecture */}
+          {/* 3-Column Decision Architecture */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Col 1: MEMORY RECALLED */}
+            {/* Col 1: SIBYL RECALL EVIDENCE */}
             <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215] space-y-4">
-              <div className="flex items-center gap-2 pb-3 border-b border-zinc-800">
-                <Database className="w-4 h-4 text-blue-400" />
-                <h2 className="text-sm font-semibold text-white uppercase font-mono">1. MEMORY RECALLED</h2>
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-blue-400" />
+                  <h2 className="text-sm font-semibold text-white uppercase font-mono">1. SIBYL RECALL</h2>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-950/80 text-blue-400 border border-blue-800 font-mono">
+                  {decision.memoryEvidence.hasHistory ? 'HISTORY FOUND' : 'COLD START'}
+                </span>
               </div>
 
               {decision.memoryEvidence.hasHistory ? (
                 <div className="space-y-3 text-xs font-mono">
-                  <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-1">
-                    <span className="text-[10px] text-zinc-500 uppercase block">Candidate</span>
-                    <span className="text-sm text-white font-bold">{decision.selectedCounterparty}</span>
-                  </div>
-
-                  <div className="space-y-2 border-t border-zinc-800/80 pt-2">
-                    <div className="flex justify-between py-1">
-                      <span className="text-zinc-500">Previous Commitment:</span>
-                      <span className="text-zinc-200">Market research</span>
+                  <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1.5">
+                    <div className="text-zinc-400">Recalled Entity: <strong className="text-white">{decision.selectedCounterparty}</strong></div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Recorded Outcomes:</span>
+                      <span className="text-zinc-200">{decision.memoryEvidence.outcomesCount}</span>
                     </div>
-                    <div className="flex justify-between py-1">
-                      <span className="text-zinc-500">Expected Deadline:</span>
-                      <span className="text-zinc-200">24 hours</span>
-                    </div>
-                    <div className="flex justify-between py-1">
-                      <span className="text-zinc-500">Actual Delivery:</span>
-                      <span className="text-orange-400 font-bold">38 hours</span>
-                    </div>
-                    <div className="flex justify-between py-1">
-                      <span className="text-zinc-500">Delivery Delay:</span>
-                      <span className="text-orange-400 font-bold">14 hours</span>
-                    </div>
-                    <div className="flex justify-between py-1">
-                      <span className="text-zinc-500">Quality Score:</span>
-                      <span className="text-yellow-400 font-bold">6/10</span>
-                    </div>
-                    <div className="flex justify-between py-1 font-bold border-t border-zinc-800/80 pt-1.5">
-                      <span className="text-zinc-400">Recalled Reliability:</span>
-                      <span className="text-white">42/100</span>
-                    </div>
+                    {decision.memoryEvidence.lastDelayHours !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Previous Delay:</span>
+                        <span className="text-orange-400 font-bold">{decision.memoryEvidence.lastDelayHours} hours late</span>
+                      </div>
+                    )}
+                    {decision.memoryEvidence.lastQualityScore !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Quality Score:</span>
+                        <span className="text-yellow-400 font-bold">{decision.memoryEvidence.lastQualityScore}/10</span>
+                      </div>
+                    )}
                   </div>
 
                   {decision.memoryEvidence.snippets && decision.memoryEvidence.snippets.length > 0 && (
-                    <div className="pt-2">
-                      <span className="text-[10px] text-zinc-500 uppercase block mb-1">Sibyl FTS5 Memory Record:</span>
-                      <div className="p-2.5 rounded bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-400 leading-snug overflow-hidden">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-zinc-500 uppercase">FTS5 Journal Evidence:</span>
+                      <div className="p-2.5 rounded bg-zinc-950/80 border border-zinc-800/80 text-[11px] text-zinc-400 line-clamp-3">
                         {decision.memoryEvidence.snippets[0]}
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-center py-8 text-xs text-zinc-500 font-mono space-y-2">
-                  <Database className="w-8 h-8 text-zinc-700 mx-auto" />
-                  <p>NO REPUTATION HISTORY</p>
-                  <p className="text-[11px] text-zinc-600">
+                <div className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-400 space-y-2">
+                  <div className="flex items-center gap-1.5 text-zinc-300 font-bold">
+                    <AlertOctagon className="w-4 h-4 text-zinc-500" />
+                    Zero Recalled History
+                  </div>
+                  <p className="text-[11px] text-zinc-500">
                     {decision.memorySimulatedOff
-                      ? 'Sibyl recall bypassed via simulate switch.'
-                      : 'Zero prior commitments or outcomes in Sibyl Memory.'}
+                      ? 'Memory recall was simulated OFF. Agent is operating completely blind.'
+                      : 'Zero prior commitments or outcomes recorded in Sibyl Memory.'}
                   </p>
                 </div>
               )}
@@ -423,11 +477,11 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
               </div>
             </div>
 
-            {/* Col 3: PACT DECISION & PAYMENT TERMS */}
+            {/* Col 3: PAYMENT PLAN & ESCROW PREVIEW */}
             <div className="p-5 rounded-xl border border-zinc-800 bg-[#121215] space-y-4">
               <div className="flex items-center gap-2 pb-3 border-b border-zinc-800">
                 <Coins className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-sm font-semibold text-white uppercase font-mono">3. PACT DECISION</h2>
+                <h2 className="text-sm font-semibold text-white uppercase font-mono">3. PAYMENT PLAN</h2>
               </div>
 
               <div className="space-y-3">
@@ -436,7 +490,7 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
                   <StrategyBadge strategy={decision.paymentStrategy} />
                 </div>
 
-                {/* Milestone Breakdown */}
+                {/* Milestone Breakdown List */}
                 <div className="space-y-2 pt-1 font-mono text-xs">
                   {decision.milestones.map((m, idx) => (
                     <div
@@ -445,46 +499,177 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-zinc-200 font-bold">
-                          ${m.amount} {idx === 0 ? 'upfront' : idx === 1 ? 'after checkpoint' : 'after final verification'}
+                          ${m.amount} {idx === 0 ? 'Initial commitment' : idx === 1 ? 'Progress checkpoint' : 'Final verification'}
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-bold">
-                          {m.percentage}%
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-bold">
+                            {m.percentage}%
+                          </span>
+                          {confirmedTxHash && (
+                            <button
+                              onClick={() => handleReleaseMilestone(idx)}
+                              disabled={releasedMilestones[idx] || releasingMilestoneIdx === idx}
+                              className={`text-[10px] px-2 py-0.5 rounded font-mono transition-colors ${
+                                releasedMilestones[idx]
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                  : 'bg-blue-600 hover:bg-blue-500 text-white'
+                              }`}
+                            >
+                              {releasingMilestoneIdx === idx ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : releasedMilestones[idx] ? (
+                                '✓ Released'
+                              ) : (
+                                'Release'
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-[11px] text-zinc-500">{m.condition}</p>
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
 
-                {/* Base Escrow Trigger Button */}
-                <div className="pt-2">
+          {/* BASE SEPOLIA ESCROW INTERACTION CARD */}
+          <div className="p-6 rounded-xl border border-blue-900/60 bg-blue-950/20 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-blue-900/40">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-base font-bold text-white font-mono">Base Sepolia Escrow Enforcement</h3>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Converts deterministic reputation terms into an on-chain smart contract escrow on Base Sepolia.
+                </p>
+              </div>
+
+              {/* Wallet Status Badge */}
+              <div className="flex items-center gap-2">
+                {walletAddress ? (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-emerald-800/80 text-xs font-mono text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+                  </div>
+                ) : (
                   <button
-                    id="btn-base-escrow"
-                    onClick={handleTriggerBaseEscrow}
-                    disabled={baseLoading}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs font-mono transition-colors shadow-sm"
+                    id="btn-connect-wallet"
+                    onClick={handleConnectWallet}
+                    disabled={isWalletConnecting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono border border-zinc-700 transition-colors"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    {baseLoading ? 'Signing Escrow...' : 'Authorize Escrow on Base Sepolia'}
+                    <Wallet className="w-3.5 h-3.5" />
+                    {isWalletConnecting ? 'Connecting...' : 'Connect Wallet'}
                   </button>
+                )}
+              </div>
+            </div>
 
-                  {baseResult && (
-                    <div className="mt-2 p-2.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono space-y-1">
-                      <div className="text-zinc-300 font-semibold">{baseResult.message}</div>
-                      {baseResult.txHash && (
-                        <a
-                          href={baseResult.explorerUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-400 hover:underline flex items-center gap-1 text-[10px]"
-                        >
-                          View BaseScan Transaction <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
+            {/* Escrow Preview Matrix */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+              <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800">
+                <span className="text-[10px] text-zinc-500 uppercase block">Network</span>
+                <span className="text-white font-semibold">Base Sepolia (84532)</span>
+              </div>
+              <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800">
+                <span className="text-[10px] text-zinc-500 uppercase block">Total Escrow</span>
+                <span className="text-white font-semibold">${decision.budget} · {decision.milestones.length} Milestones</span>
+              </div>
+              <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 sm:col-span-2">
+                <span className="text-[10px] text-zinc-500 uppercase block">Beneficiary Agent Wallet</span>
+                <span className="text-blue-300 text-[11px] truncate block" title={beneficiaryWallet}>
+                  {beneficiaryWallet}
+                </span>
+              </div>
+            </div>
+
+            {/* Interactive Create Escrow Action Button */}
+            <div className="space-y-3">
+              {!confirmedTxHash ? (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  {!walletAddress && hasInjectedWallet() ? (
+                    <button
+                      id="btn-connect-wallet-main"
+                      onClick={handleConnectWallet}
+                      disabled={isWalletConnecting}
+                      className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs font-mono transition-all shadow"
+                    >
+                      <Wallet className="w-4 h-4" />
+                      {isWalletConnecting ? 'Connecting Wallet...' : 'Connect Wallet to Authorize Escrow'}
+                    </button>
+                  ) : (
+                    <button
+                      id="btn-create-escrow-action"
+                      onClick={handleCreateOnChainEscrow}
+                      disabled={txStep === 'AWAITING_APPROVAL' || txStep === 'CONFIRMING'}
+                      className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs font-mono transition-all shadow active:scale-95"
+                    >
+                      <Send className="w-4 h-4" />
+                      {txStep === 'AWAITING_APPROVAL'
+                        ? 'Waiting for wallet approval...'
+                        : txStep === 'CONFIRMING'
+                        ? 'Confirming on Base Sepolia...'
+                        : 'Create Base Sepolia Escrow'}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              {/* Transaction State Progress Tracker */}
+              {txStep !== 'IDLE' && (
+                <div className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 font-mono text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-400">Transaction Status:</span>
+                    <span
+                      className={`font-bold ${
+                        txStep === 'SUCCESS'
+                          ? 'text-emerald-400'
+                          : txStep === 'ERROR'
+                          ? 'text-red-400'
+                          : 'text-amber-400'
+                      }`}
+                    >
+                      {txStep === 'CONNECTING_WALLET' && 'Connecting wallet...'}
+                      {txStep === 'SWITCHING_NETWORK' && 'Switching to Base Sepolia...'}
+                      {txStep === 'AWAITING_APPROVAL' && 'Waiting for wallet approval...'}
+                      {txStep === 'BROADCASTING' && 'Transaction submitted...'}
+                      {txStep === 'CONFIRMING' && 'Confirming on Base Sepolia...'}
+                      {txStep === 'SUCCESS' && 'Escrow created ✓'}
+                      {txStep === 'ERROR' && 'Transaction Failed'}
+                    </span>
+                  </div>
+
+                  {txStatusMessage && (
+                    <div className="text-[11px] text-zinc-300">{txStatusMessage}</div>
+                  )}
+
+                  {confirmedTxHash && (
+                    <div className="pt-2 border-t border-zinc-800 space-y-1">
+                      <div className="text-zinc-400 text-[11px]">
+                        Transaction Hash:{' '}
+                        <span className="text-zinc-200">{confirmedTxHash}</span>
+                      </div>
+                      <a
+                        href={confirmedExplorerUrl || formatBaseScanTxUrl(confirmedTxHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 underline text-xs font-semibold"
+                      >
+                        View Verified Transaction on BaseScan Sepolia <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  )}
+
+                  {escrowError && (
+                    <div className="p-2.5 rounded bg-red-950/60 border border-red-800 text-red-300 text-[11px]">
+                      {escrowError}
                     </div>
                   )}
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -529,7 +714,7 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
                       <span className="text-white font-bold">$10 Upfront · $20 Checkpoint · $20 Final</span>
                     </div>
                     <div className="pt-2 border-t border-orange-900/60 text-[11px] text-orange-200">
-                      <strong>Reason:</strong> Previous late delivery (14h late, 6/10 quality score).
+                      <strong>Causal Link:</strong> Previous 14h delay and 6/10 score enforces 3 milestones on Base Sepolia.
                     </div>
                   </div>
                 </div>
@@ -561,7 +746,7 @@ export const DecisionView: React.FC<DecisionViewProps> = ({
                       <span className="text-zinc-300">$15 Upfront (30%) · $35 Delivery (70%)</span>
                     </div>
                     <div className="pt-2 border-t border-zinc-800 text-[11px] text-zinc-400">
-                      <strong>Reason:</strong> No previous reputation history available.
+                      <strong>Blind Failure:</strong> Blind session has no memory and grants standard terms.
                     </div>
                   </div>
                 </div>

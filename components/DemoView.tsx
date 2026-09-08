@@ -15,9 +15,13 @@ import {
   RotateCcw,
   Split,
   Layers,
+  ExternalLink,
+  ShieldCheck,
+  Send,
 } from 'lucide-react';
 import { Decision } from '@/lib/types';
 import { RiskBadge, StrategyBadge } from './Badge';
+import { formatBaseScanTxUrl } from '@/lib/contracts/pactEscrow';
 
 interface DemoViewProps {
   sessionId: string;
@@ -38,6 +42,7 @@ export const DemoView: React.FC<DemoViewProps> = ({
     recalled?: any;
     decisionWithMemory?: Decision | null;
     decisionWithoutMemory?: Decision | null;
+    escrowResult?: any;
   }>({});
 
   const executeStep = async (step: number) => {
@@ -95,7 +100,7 @@ export const DemoView: React.FC<DemoViewProps> = ({
         setStepData((prev) => ({ ...prev, recalled: data }));
         setActiveStep(6);
       } else if (step === 6) {
-        // STEP 6: Evaluate new $50 task WITH Memory
+        // STEP 6: Evaluate new $50 task WITH Memory & also fetch comparison
         const resWith = await fetch('/api/decide', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -108,13 +113,8 @@ export const DemoView: React.FC<DemoViewProps> = ({
           }),
         });
         const dataWith = await resWith.json();
-        setStepData((prev) => ({
-          ...prev,
-          decisionWithMemory: dataWith.decision,
-        }));
-        setActiveStep(7);
-      } else if (step === 7) {
-        // STEP 7: Disable memory (Simulate No Memory / Cold Start)
+
+        // Also evaluate without memory for comparison
         const resWithout = await fetch('/api/decide', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -127,10 +127,32 @@ export const DemoView: React.FC<DemoViewProps> = ({
           }),
         });
         const dataWithout = await resWithout.json();
+
         setStepData((prev) => ({
           ...prev,
+          decisionWithMemory: dataWith.decision,
           decisionWithoutMemory: dataWithout.decision,
         }));
+        setActiveStep(7);
+      } else if (step === 7) {
+        // STEP 7: Create Base Sepolia escrow ($50, $10 / $20 / $20)
+        const res = await fetch('/api/base/escrow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commitmentId: 'comm-escrow-demo-step7',
+            counterpartyName: 'ResearchAgent-A',
+            budget: 50,
+            strategy: 'MILESTONE_3',
+            milestones: [
+              { amount: 10, percentage: 20 },
+              { amount: 20, percentage: 40 },
+              { amount: 20, percentage: 40 },
+            ],
+          }),
+        });
+        const data = await res.json();
+        setStepData((prev) => ({ ...prev, escrowResult: data }));
         onRefreshAll();
       }
     } catch (err) {
@@ -161,8 +183,8 @@ export const DemoView: React.FC<DemoViewProps> = ({
   const steps = [
     {
       num: 1,
-      title: 'STEP 1: Create first commitment',
-      desc: 'ResearchAgent-A · $10 budget · 24h deadline',
+      title: 'STEP 1: Create commitment',
+      desc: 'ResearchAgent-A · Market research · $10 · 24h',
     },
     {
       num: 2,
@@ -171,28 +193,28 @@ export const DemoView: React.FC<DemoViewProps> = ({
     },
     {
       num: 3,
-      title: 'STEP 3: Persist to Sibyl',
-      desc: '✓ Commitment persisted ✓ Outcome persisted ✓ Counterparty updated',
+      title: 'STEP 3: Persist outcome',
+      desc: 'Sibyl Memory ✓ persisted to long-term storage',
     },
     {
       num: 4,
       title: 'STEP 4: Start fresh session',
-      desc: 'Spawns brand-new session with zero local memory',
+      desc: 'New session ID · zero local conversational state',
     },
     {
       num: 5,
-      title: 'STEP 5: Recall from Sibyl',
-      desc: 'Previous delivery: 38h · Delay: 14h · Score: 42/100',
+      title: 'STEP 5: Recall history',
+      desc: 'Previous: 38h · Delay: 14h · Score: 42/100',
     },
     {
       num: 6,
-      title: 'STEP 6: Evaluate new $50 task',
-      desc: 'Enforces HIGH RISK & 3 MILESTONES ($10 / $20 / $20)',
+      title: 'STEP 6: Make decision',
+      desc: 'HIGH RISK · 3 MILESTONES ($10 / $20 / $20)',
     },
     {
       num: 7,
-      title: 'STEP 7: Disable memory (Cold start)',
-      desc: 'Proves decision changes because of memory',
+      title: 'STEP 7: Create Base Sepolia escrow',
+      desc: 'Enforce $50 milestone terms on Base Sepolia',
     },
   ];
 
@@ -203,10 +225,10 @@ export const DemoView: React.FC<DemoViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-amber-400" />
-            <h1 className="text-xl font-bold text-white">Interactive Guided Demo</h1>
+            <h1 className="text-xl font-bold text-white">Interactive Judging Demo</h1>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            "See why memory matters": Step-by-step hackathon demonstration proving that memory changes economic decisions.
+            <strong>The PACT Causal Chain:</strong> Sibyl Memory → Persistent Reputation → Risk Assessment → Payment Strategy → Base Sepolia Escrow.
           </p>
         </div>
 
@@ -268,18 +290,18 @@ export const DemoView: React.FC<DemoViewProps> = ({
               {loading
                 ? 'Executing...'
                 : activeStep === 1
-                ? 'Create Commitment'
+                ? '1. Create Commitment'
                 : activeStep === 2
-                ? 'Record Outcome'
+                ? '2. Record Outcome'
                 : activeStep === 3
-                ? 'Verify Persistence'
+                ? '3. Verify Persistence'
                 : activeStep === 4
-                ? 'Start Fresh Session'
+                ? '4. Start Fresh Session'
                 : activeStep === 5
-                ? 'Recall History'
+                ? '5. Recall History'
                 : activeStep === 6
-                ? 'Evaluate $50 Task'
-                : 'Disable Memory & Compare'}
+                ? '6. Make Decision'
+                : '7. Create Base Sepolia Escrow'}
             </button>
           </div>
 
@@ -289,7 +311,7 @@ export const DemoView: React.FC<DemoViewProps> = ({
               <div className="text-emerald-400 font-bold">✓ SIBYL MEMORY PERSISTED</div>
               <div>✓ Commitment: {stepData.commitment.id} (${stepData.commitment.budget}, 24h expected)</div>
               <div>✓ Outcome: 38h actual delivery (14h late, 6/10 quality)</div>
-              <div>✓ Counterparty State: ResearchAgent-A updated in ~/.sibyl-memory/memory.db</div>
+              <div>✓ Counterparty: ResearchAgent-A written to ~/.sibyl-memory/memory.db</div>
             </div>
           )}
 
@@ -302,10 +324,36 @@ export const DemoView: React.FC<DemoViewProps> = ({
               <div>Calculated Reliability: <strong>42/100 (HIGH RISK)</strong></div>
             </div>
           )}
+
+          {activeStep === 7 && stepData.escrowResult && (
+            <div className="p-4 rounded bg-blue-950/40 border border-blue-800 font-mono text-xs space-y-2 text-zinc-200">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4" />
+                BASE SEPOLIA ESCROW LAYER READY
+              </div>
+              <div>Status: <strong>{stepData.escrowResult.status}</strong></div>
+              <div>Message: {stepData.escrowResult.message}</div>
+              {stepData.escrowResult.txHash && (
+                <div>
+                  Tx Hash: <span className="text-zinc-300">{stepData.escrowResult.txHash}</span>
+                  <div className="mt-1">
+                    <a
+                      href={stepData.escrowResult.explorerUrl || formatBaseScanTxUrl(stepData.escrowResult.txHash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 hover:underline inline-flex items-center gap-1 text-[11px]"
+                    >
+                      View on BaseScan Sepolia <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Step 7 Final Comparison: WITH MEMORY vs WITHOUT MEMORY */}
+      {/* Step 6 & 7 Final Comparison: WITH MEMORY vs WITHOUT MEMORY */}
       {stepData.decisionWithMemory && (
         <div className="space-y-6">
           <div className="p-5 rounded-xl border border-emerald-800/80 bg-emerald-950/30 text-emerald-200 space-y-2">
@@ -314,7 +362,7 @@ export const DemoView: React.FC<DemoViewProps> = ({
               DECISION CHANGED BECAUSE OF MEMORY
             </div>
             <p className="text-xs leading-relaxed text-zinc-300">
-              In Session A, ResearchAgent-A delivered 14 hours late with 6/10 quality. In Fresh Session B, PACT recalled this outcome from Sibyl Memory. Instead of blind approval, PACT downgraded reliability to 42/100 and enforced a 3-milestone escrow.
+              "Persistent memory changes the economic controls applied to the agent." In Session A, ResearchAgent-A delivered 14 hours late with 6/10 quality. In Fresh Session B, PACT recalled this outcome from Sibyl Memory. Instead of blind approval, PACT downgraded reliability to <strong>42/100 (HIGH RISK)</strong> and enforced <strong>3 milestones on Base Sepolia ($10 upfront, $20 checkpoint, $20 final verification)</strong>.
             </p>
           </div>
 
@@ -342,13 +390,13 @@ export const DemoView: React.FC<DemoViewProps> = ({
                   <StrategyBadge strategy="MILESTONE_3" />
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Milestone Structure:</span>
+                  <span className="text-zinc-400">Base Sepolia Escrow:</span>
                   <span className="text-white font-bold">$10 Upfront · $20 Checkpoint · $20 Final</span>
                 </div>
               </div>
 
               <div className="p-3 rounded bg-zinc-950/80 border border-orange-900/60 text-[11px] text-orange-200/90 leading-snug">
-                <strong>Reason:</strong> Previous delivery was 14 hours late and scored 6/10. Full upfront payment denied.
+                <strong>Reason:</strong> Previous delivery was 14 hours late and scored 6/10. Full upfront disbursement denied.
               </div>
             </div>
 
@@ -383,7 +431,7 @@ export const DemoView: React.FC<DemoViewProps> = ({
               </div>
 
               <div className="p-3 rounded bg-zinc-950/80 border border-zinc-800 text-[11px] text-zinc-400 leading-snug">
-                <strong>Reason:</strong> No previous reputation history available.
+                <strong>Blind Fallback:</strong> Fresh session has no memory and mistakenly grants standard unverified terms.
               </div>
             </div>
           </div>

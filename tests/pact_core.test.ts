@@ -247,6 +247,52 @@ async function runTests() {
     `With Memory: ${decisionWithMemory.paymentStrategy} (${decisionWithMemory.milestoneCount} milestones) vs Without Memory: ${decisionWithoutMemory.paymentStrategy} (${decisionWithoutMemory.milestoneCount} milestones)`
   );
 
+  // ----------------------------------------------------
+  // TEST 10, 11, 12: Base Sepolia Escrow Layer
+  // ----------------------------------------------------
+  console.log('\n--- Testing Base Sepolia Escrow & Blockchain Integration ---');
+
+  const {
+    PACT_ESCROW_ABI,
+    DEFAULT_BASE_SEPOLIA_CHAIN_ID,
+    formatBaseScanTxUrl,
+    DEMO_AGENT_WALLETS,
+  } = await import('../lib/contracts/pactEscrow');
+  const { executeBaseEscrowCommitment } = await import('../lib/base');
+
+  const functionNames = PACT_ESCROW_ABI.filter((x: any) => x.type === 'function').map((x: any) => x.name);
+  assert(
+    functionNames.includes('createEscrow') &&
+      functionNames.includes('fundEscrow') &&
+      functionNames.includes('releaseMilestone'),
+    'Test 10: PACTEscrow ABI contains createEscrow, fundEscrow, and releaseMilestone'
+  );
+
+  assert(
+    DEFAULT_BASE_SEPOLIA_CHAIN_ID === 84532,
+    'Test 11: Base Sepolia Chain ID is verified at 84532'
+  );
+
+  const testTxHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+  assert(
+    formatBaseScanTxUrl(testTxHash) === `https://sepolia.basescan.org/tx/${testTxHash}`,
+    'Test 12: BaseScan Sepolia transaction URL formats without hardcoded fakes'
+  );
+
+  const baseResult = await executeBaseEscrowCommitment({
+    commitmentId: 'comm-test-10',
+    counterpartyName: 'ResearchAgent-A',
+    budgetEthOrUsd: 50,
+    strategy: 'MILESTONE_3',
+    milestones: decisionWithMemory.milestones,
+  });
+
+  assert(
+    baseResult.success === true &&
+      (baseResult.status === 'ENV_KEY_MISSING' || baseResult.status === 'BROADCASTED'),
+    'Test 13: Base Sepolia escrow handler reports truthful state without fabricating transactions'
+  );
+
   console.log('\n====================================================');
   console.log(`TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

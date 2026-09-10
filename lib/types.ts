@@ -119,3 +119,112 @@ export interface SibylSearchResult {
   rank: number;
   ts?: string;
 }
+
+// ==========================================
+// Phase 5: PACT Real Agent Workflow Types
+// ==========================================
+
+export interface CandidateProfile {
+  name: string;
+  capability: string;
+  basePrice: number;
+  walletAddress?: string;
+}
+
+export interface CandidateEvaluation {
+  name: string;
+  capability: string;
+  price: number;
+  withinBudget: boolean;
+  reliabilityScore: number;
+  riskLevel: RiskLevel;
+  commitmentsCount: number;
+  outcomesCount: number;
+  avgDelayHours: number;
+  avgQualityScore: number;
+  utilityScore: number;
+  status: 'SELECTED' | 'REJECTED_OVER_BUDGET' | 'REJECTED_HIGH_RISK_ALTERNATIVE' | 'REJECTED_LOWER_UTILITY' | 'DISQUALIFIED';
+  rejectionReason?: string;
+  memorySummary: {
+    commitments: number;
+    successful: number;
+    late: number;
+    failed: number;
+    avgQuality: number;
+    snippets: string[];
+  };
+}
+
+export interface PreparedEscrowAction {
+  action: 'PREPARE_ESCROW';
+  network: string;
+  chainId: number;
+  contractAddress?: string;
+  beneficiaryAddress: string;
+  counterpartyName: string;
+  totalAmount: number;
+  currency: string;
+  milestones: Milestone[];
+  ethEquivalent: string;
+  readyToBroadcast: boolean;
+  instructions: string;
+}
+
+export interface PactAgentInput {
+  task: string;
+  budget: number;
+  deadlineHours: number;
+  candidatePool?: string[];
+  simulateNoMemory?: boolean;
+  sessionId?: string;
+}
+
+export interface PactAgentDecision {
+  task: string;
+  budget: number;
+  deadlineHours: number;
+  selectedCounterparty: string;
+  reputation: number;
+  riskLevel: RiskLevel;
+  price: number;
+  paymentStrategy: PaymentStrategyType;
+  paymentTerms: {
+    strategy: PaymentStrategyType;
+    milestoneCount: number;
+    milestones: Milestone[];
+    summary: string;
+  };
+  reasoning: string;
+  whySection: {
+    summary: string;
+    winnerRationale: string;
+    comparisonPoints: string[];
+    alternativesAnalysis: {
+      candidate: string;
+      status: string;
+      explanation: string;
+    }[];
+  };
+  memoryEvidence: {
+    hasHistory: boolean;
+    candidateEvaluated: string;
+    commitmentsCount: number;
+    outcomesCount: number;
+    successfulCount: number;
+    lateCount: number;
+    avgQuality: number;
+    lastDelayHours?: number;
+    lastQualityScore?: number;
+    lastNotes?: string;
+    journalSnippets: string[];
+  };
+  candidatesEvaluated: CandidateEvaluation[];
+  nextAction: 'PREPARE_ESCROW';
+  preparedEscrowAction: PreparedEscrowAction;
+  commitmentCreated?: Commitment;
+  isColdStart: boolean;
+  memorySimulatedOff: boolean;
+  sessionId: string;
+  evaluatedAt: string;
+}
+

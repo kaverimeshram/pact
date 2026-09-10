@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { DashboardView } from '@/components/DashboardView';
+import { AgentView } from '@/components/AgentView';
 import { CounterpartiesView } from '@/components/CounterpartiesView';
 import { CommitmentsView } from '@/components/CommitmentsView';
 import { DecisionView } from '@/components/DecisionView';
@@ -21,9 +22,11 @@ function generateShortSessionId(): string {
   return result;
 }
 
+const INITIAL_SESSION_ID = 'Session 2026';
+
 export default function Home({ defaultTab = 'dashboard' }: { defaultTab?: string }) {
   const [activeTab, setActiveTab] = useState(defaultTab);
-  const [sessionId, setSessionId] = useState(generateShortSessionId());
+  const [sessionId, setSessionId] = useState(INITIAL_SESSION_ID);
   const [sibylStatus, setSibylStatus] = useState<any>(null);
 
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
@@ -107,6 +110,7 @@ export default function Home({ defaultTab = 'dashboard' }: { defaultTab?: string
   };
 
   useEffect(() => {
+    setSessionId(generateShortSessionId());
     fetchAllData();
   }, []);
 
@@ -140,6 +144,13 @@ export default function Home({ defaultTab = 'dashboard' }: { defaultTab?: string
             onOpenEvaluate={handleOpenEvaluate}
             onSeedDemo={handleSeedDemoData}
             loading={loading}
+          />
+        )}
+
+        {activeTab === 'agent' && (
+          <AgentView
+            sessionId={sessionId}
+            onFreshSession={handleFreshSession}
           />
         )}
 

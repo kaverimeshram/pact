@@ -68,6 +68,45 @@ User / Agent Task Request
 
 ---
 
+## Phase 5: Autonomous PACT Agent Workflow
+
+PACT includes a full autonomous agent workflow accessible at `/agent` and via the API at `POST /api/pact/agent`.
+
+### The Workflow Pipeline:
+```
+USER REQUEST ("Produce a market report for $60")
+       ↓
+UNDERSTAND TASK & CONSTRAINTS (Budget: $60, Deadline: 24h)
+       ↓
+SIBYL MEMORY LOOKUP (Recalls past commitments & outcomes from SQLite/FTS5)
+       ↓
+DETERMINISTIC REPUTATION CALCULATION (Agent A: 42/100 HIGH RISK | Agent B: 76/100 LOW RISK | Agent C: 94/100)
+       ↓
+COUNTERPARTY SELECTION (Chooses Agent B: Safety over naive cost minimization)
+       ↓
+PAYMENT TERMS STRUCTURING (Risk-adjusted milestones: Full upfront vs 3-stage escrow)
+       ↓
+CREATE COMMITMENT (Persisted back to Sibyl Memory & cold journal)
+       ↓
+PREPARE BASE SEPOLIA ESCROW (Lock funds on-chain for counterparty wallet)
+```
+
+### API Endpoint (`POST /api/pact/agent`)
+
+```bash
+curl -X POST http://localhost:3000/api/pact/agent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Produce a market research report",
+    "budget": 60,
+    "deadlineHours": 24
+  }'
+```
+
+Returns the structured decision JSON including selected counterparty, reputation score, risk level, payment terms, explainable rationale, load-bearing memory evidence, and prepared Base Sepolia escrow payload.
+
+---
+
 ## Smart Contract Layer (`contracts/PACTEscrow.sol`)
 
 The escrow smart contract is located in [`contracts/PACTEscrow.sol`](file:///Users/mikasa05/pact/contracts/PACTEscrow.sol):

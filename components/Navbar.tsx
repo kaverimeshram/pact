@@ -9,6 +9,7 @@ import {
   FileCheck,
   Cpu,
   Sparkles,
+  Bot,
   ShieldAlert,
 } from 'lucide-react';
 
@@ -29,10 +30,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Layers },
+    { id: 'agent', label: 'Agent', icon: Bot, highlight: true },
     { id: 'counterparties', label: 'Counterparties', icon: Users },
     { id: 'commitments', label: 'Commitments', icon: FileCheck },
     { id: 'memory', label: 'Memory', icon: Database },
-    { id: 'decisions', label: 'Decisions', icon: Cpu, highlight: true },
+    { id: 'decisions', label: 'Decisions', icon: Cpu },
     { id: 'demo', label: 'Demo', icon: Sparkles },
   ];
 

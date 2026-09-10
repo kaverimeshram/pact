@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx tests/pact_core.test.ts",
+    "test": "tsx tests/pact_core.test.ts && tsx tests/pact_agent.test.ts",
+    "test:agent": "tsx tests/pact_agent.test.ts",
     "test:contracts": "forge test -v",
     "compile:contracts": "forge build",
     "deploy:escrow": "tsx scripts/deploy_escrow.ts"

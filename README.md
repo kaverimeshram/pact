@@ -1,229 +1,346 @@
-# PACT: Persistent Agent Commitment Tracker
+# PACT
 
-> **A memory-backed reputation system for AI agents powered by Sibyl Memory & Base Sepolia Escrow.**
+### Persistent reputation for AI agents.
 
-Built for the **Sibyl Labs Hackathon 2026**.
-
----
-
-## What it does
-
-**PACT** tracks AI agent commitments, deadlines, and delivery outcomes in persistent long-term storage (**Sibyl Memory**). It ensures that past performance (such as delivery delays, quality scores, broken promises, or dispute records) directly changes future economic decisions (such as requiring milestone payments and withholding upfront disbursements for high-risk counterparties) and enforces them through on-chain escrow contracts on **Base Sepolia**.
+PACT is a persistent reputation and commitment layer for AI agents. As autonomous agents increasingly transact with other agents and service providers, stateless sessions cannot remember who kept promises. PACT uses Sibyl Memory to persist commitments, delivery outcomes, delays, quality scores, and counterparty history—directly transforming historical trust signals into risk-aware counterparty selection and milestone escrow terms.
 
 ---
 
-## The Problem
+## 1. What PACT Is
 
-Autonomous AI agents frequently hire and negotiate with other AI agents or automated service providers. However, standard LLM sessions are stateless:
+Autonomous AI agents frequently hire and negotiate with sub-agents or external service providers. However, standard LLM sessions are stateless: a fresh session starts completely blind, unable to recall whether a counterparty delivered on time or defaulted on a previous commitment.
 
-1. **A fresh agent session starts completely blind**: It does not remember whether a counterparty kept or broke its commitments yesterday.
-2. **Untrusted counterparties exploit amnesia**: An agent that promises a 24-hour delivery but takes 38 hours with substandard quality is treated identically to a brand-new, high-trust provider in subsequent sessions.
-3. **Financial loss**: The hiring agent blindly pays 100% upfront again, repeating the same counterparty failure.
-
----
-
-## The Solution & Causal Chain
-
-PACT connects agent negotiations to **Sibyl Memory** and enforces terms on **Base Sepolia**:
-
-- **Session A**: Records promised deadlines and logs the actual outcome (e.g. 14 hours late, 6/10 quality score) into Sibyl Memory.
-- **Persistent Storage**: Sibyl persists both structured entities (`counterparties`, `commitments`, `outcomes`) and COLD-tier journal events in SQLite FTS5 store (`~/.sibyl-memory/memory.db`).
-- **Fresh Session B**: A brand-new session with **zero local conversational state** queries Sibyl Memory, recalls the counterparty's historical delay and quality score, deterministic mathematical scoring calculates reliability at **42/100 (HIGH RISK)**.
-- **Base Sepolia Escrow**: PACT enforces a **3-Milestone Escrow Payment Plan** ($10 upfront / 20%, $20 checkpoint / 40%, $20 final verification / 40%) locked on Base Sepolia.
-
-$$\text{SIBYL MEMORY} \longrightarrow \text{REPUTATION} \longrightarrow \text{RISK ASSESSMENT} \longrightarrow \text{PAYMENT STRATEGY} \longrightarrow \text{BASE SEPOLIA ESCROW}$$
+PACT solves agent amnesia by introducing a persistent memory-backed accountability layer:
+- **Tracks Commitments**: Records promised tasks, budgets, deadlines, and expected quality.
+- **Persists Outcomes**: Logs actual delivery times, delays, quality ratings, and dispute statuses into **Sibyl Memory**.
+- **Calculates Reputation**: Computes deterministic reliability scores (0–100) and risk classifications (`LOW`, `MEDIUM`, `HIGH`, `UNKNOWN`).
+- **Governs Economic Decisions**: Replaces naive cost-minimization with risk-adjusted counterparty selection and multi-stage escrow milestones.
 
 ---
 
-## Why Sibyl is Load-Bearing
+## 2. The Core Loop
 
-> [!IMPORTANT]
-> **PACT's reputation engine depends on persistent counterparty history. A fresh session cannot reproduce the same reputation-aware decision without recalling commitments and outcomes from Sibyl Memory.**
-
-Without Sibyl Memory, a fresh session has no access to previous interactions and falls back to a **Cold-Start Decision** (50/100 reliability, `UNKNOWN` risk, standard baseline terms). Sibyl is not an optional cache or a simple vector store—it is the single source of truth for cross-session agent accountability.
-
----
-
-## Architecture Flow
+The diagram below illustrates the end-to-end causal chain from persistent memory recall to on-chain escrow preparation:
 
 ```
-User / Agent Task Request
-           ↓
-     Sibyl Recall (lib/memory/sibyl.ts)
-           ↓
-  Counterparty History (~/.sibyl-memory/memory.db)
-           ↓
-  Reputation Engine (lib/reputation.ts)
-           ↓
-   Decision Engine (lib/decision-engine.ts)
-           ↓
-  Payment Strategy (e.g. 3 Milestones: $10 / $20 / $20)
-           ↓
-  Base Sepolia Escrow (contracts/PACTEscrow.sol & lib/wallet.ts)
-           ↓
-   Delivery Outcome (Delay, Quality, Success)
-           ↓
-   Sibyl Persistence (Entities & COLD Journal)
+┌─────────────────────────────────────────────────────────┐
+│                      Sibyl Memory                       │
+│        (SQLite FTS5 Persistent Entity & Journal Store)  │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Counterparty History                   │
+│   (Historical Commitments, Delays, Quality Scores)     │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Reputation Engine                    │
+│      (Deterministic Scoring: 0-100 & Risk Tiers)        │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                     Agent Decision                      │
+│        (Risk-Aware Selection vs Naive Cost Minimization)│
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Payment Strategy                     │
+│    (Full Upfront vs 2-Stage Deposit vs 3-Stage Escrow)  │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                       Base Escrow                       │
+│    (Prepared Multi-Milestone Escrow on Base Sepolia)    │
+└─────────────────────────────────────────────────────────┘
 ```
+
+**Sibyl Memory is load-bearing throughout this loop.** The agent's economic choices (who to hire and how to structure payments) depend directly on the historical outcome data stored in Sibyl.
 
 ---
 
-## Phase 5: Autonomous PACT Agent Workflow
+## 3. The Key Demo Scenario
 
-PACT includes a full autonomous agent workflow accessible at `/agent` and via the API at `POST /api/pact/agent`.
+Consider an autonomous agent assigned the following task:
+- **Task**: Produce a market research report
+- **Budget**: $60
+- **Deadline**: 24 hours
 
-### The Workflow Pipeline:
-```
-USER REQUEST ("Produce a market report for $60")
-       ↓
-UNDERSTAND TASK & CONSTRAINTS (Budget: $60, Deadline: 24h)
-       ↓
-SIBYL MEMORY LOOKUP (Recalls past commitments & outcomes from SQLite/FTS5)
-       ↓
-DETERMINISTIC REPUTATION CALCULATION (Agent A: 42/100 HIGH RISK | Agent B: 76/100 LOW RISK | Agent C: 94/100)
-       ↓
-COUNTERPARTY SELECTION (Chooses Agent B: Safety over naive cost minimization)
-       ↓
-PAYMENT TERMS STRUCTURING (Risk-adjusted milestones: Full upfront vs 3-stage escrow)
-       ↓
-CREATE COMMITMENT (Persisted back to Sibyl Memory & cold journal)
-       ↓
-PREPARE BASE SEPOLIA ESCROW (Lock funds on-chain for counterparty wallet)
-```
+The agent evaluates three available candidates:
 
-### API Endpoint (`POST /api/pact/agent`)
+| Candidate | Price | Reputation | Risk Level | Historical Track Record (from Sibyl Memory) | Evaluation Outcome |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| **ResearchAgent-A** | **$40** | **42 / 100** | **HIGH** | Previous delivery was **14 hours late**; quality score **6/10**. | **Rejected (High Risk)** — Cheaper, but past failure poses unacceptable execution risk. |
+| **ResearchAgent-B** | **$55** | **76 / 100** | **LOW** | 8 historical commitments, consistent on-time delivery, **8.8/10** average quality. | **SELECTED** — Fits within the $60 budget and holds a proven reliability record. |
+| **ResearchAgent-C** | **$85** | **94 / 100** | **LOW** | Flawless historical record, premium specialized capabilities. | **Rejected (Over Budget)** — Exceeds the $60 task budget. |
 
+### Decision Logic
+A naive agent without memory would select **ResearchAgent-A** simply because $40 is the cheapest option. PACT queries Sibyl Memory, detects Agent A's past 14-hour delay and degraded quality score, and selects **ResearchAgent-B** ($55). 
+
+PACT prioritizes learned reliability and safety over naive cost minimization.
+
+---
+
+## 4. Memory vs. Cold Start
+
+PACT demonstrates a measurable behavioral divergence when persistent memory is present versus when it is omitted:
+
+### WITH MEMORY
+1. Queries Sibyl Memory to retrieve past commitments, delays, and quality metrics for all candidates.
+2. Calculates exact reliability scores (`Agent A: 42/100`, `Agent B: 76/100`, `Agent C: 94/100`).
+3. Rejects high-risk candidate `ResearchAgent-A` ($40) and selects `ResearchAgent-B` ($55).
+4. Configures structured milestone escrow protection tailored to counterparty risk.
+
+### WITHOUT MEMORY (Cold Start)
+1. Has no historical records or outcome data for any candidate.
+2. Assigns default baseline reputation (`50/100`, `UNKNOWN` risk) across all candidates.
+3. Blindly selects `ResearchAgent-A` ($40) solely because it is the lowest nominal quote.
+4. Leaves the hiring agent vulnerable to repeated counterparty delivery failures.
+
+> **"Same task. Same candidates. Different decision."**
+
+---
+
+## 5. Why Sibyl Memory is Load-Bearing
+
+Sibyl Memory is not an optional log viewer or presentation cache. It is a foundational dependency in PACT's decision pipeline:
+
+- **Mathematical Dependency**: Reputation scores are deterministically computed from historical delivery outcomes (delays, quality ratings, dispute events) persisted in Sibyl Memory (`~/.sibyl-memory/memory.db`).
+- **Amnesia Prevention**: When an agent session terminates, all in-memory LLM state is lost. A subsequent session relying on local variables cannot differentiate between a reliable partner and a serial defaulter.
+- **Causal Impact**: Deleting or bypassing Sibyl Memory strips away the historical evidence, causing the decision engine to fall back to uncalibrated cold-start defaults.
+
+Without Sibyl Memory, PACT cannot perform risk-aware selection or enforce learned economic controls.
+
+---
+
+## 6. Architecture & Codebase Map
+
+| File Path | Description |
+| :--- | :--- |
+| [`lib/memory/sibyl.ts`](file:///Users/mikasa05/pact/lib/memory/sibyl.ts) | Bridge interface connecting to the Sibyl Memory Python CLI (`uv run --with sibyl-memory-cli`). Handles entity persistence (`commitments`, `outcomes`, `counterparties`), structured queries, and journal event logging. |
+| [`lib/reputation.ts`](file:///Users/mikasa05/pact/lib/reputation.ts) | Deterministic scoring engine. Calculates reliability scores (0–100), risk tiers (`LOW`, `MEDIUM`, `HIGH`, `UNKNOWN`), and risk-adjusted milestone payment structures. |
+| [`lib/decision-engine.ts`](file:///Users/mikasa05/pact/lib/decision-engine.ts) | Core decision engine for individual counterparty evaluations. Compares memory-backed decisions against simulated cold-start baselines. |
+| [`lib/pact-agent.ts`](file:///Users/mikasa05/pact/lib/pact-agent.ts) | Orchestrator for the autonomous multi-agent workflow: task intake, candidate ranking, Sibyl memory recall, commitment creation, and escrow preparation. |
+| [`app/api/pact/agent/route.ts`](file:///Users/mikasa05/pact/app/api/pact/agent/route.ts) | Next.js API route exposing `POST /api/pact/agent` for automated agent evaluations and `GET` for presets and candidate metadata. |
+| [`components/AgentView.tsx`](file:///Users/mikasa05/pact/components/AgentView.tsx) | Interactive dashboard interface for the PACT Agent. Features live decision inspection, candidate comparison cards, reasoning breakdowns, and Base Sepolia escrow review. |
+| [`contracts/PACTEscrow.sol`](file:///Users/mikasa05/pact/contracts/PACTEscrow.sol) | Solidity smart contract for multi-milestone agent escrow on Base Sepolia. Implements non-reentrancy checks, milestone release controls, and dispute handling. |
+| [`tests/pact_core.test.ts`](file:///Users/mikasa05/pact/tests/pact_core.test.ts) | Core test suite covering reputation calculations, milestone breakdown math, fresh session memory recall, and Base Sepolia contract definitions (17 test cases). |
+| [`tests/pact_agent.test.ts`](file:///Users/mikasa05/pact/tests/pact_agent.test.ts) | Multi-agent workflow test suite verifying candidate selection, safety over cost minimization, explainability rationale, and cold-start differentials (10 test cases). |
+
+---
+
+## 7. Interactive Demo
+
+### Prerequisites
+- **Node.js**: `v20+`
+- **Python**: `3.10+`
+- **uv**: Package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
+- **Sibyl CLI**: `uv tool install 'sibyl-memory-cli[mcp]'`
+
+### Quick Start
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+
+3. **Open the Agent Workflow:**
+   Navigate to [http://localhost:3000/agent](http://localhost:3000/agent) in your browser.
+
+### What to Observe:
+1. **Input Task**: Select the default preset:
+   - **Task**: `Produce a market research report`
+   - **Budget**: `$60`
+   - **Deadline**: `24 hours`
+2. **Execute Decision**: Click **Run PACT Agent**.
+3. **Inspect Selection**: Observe that PACT selects **ResearchAgent-B** ($55, 76/100 reputation) over the cheaper **ResearchAgent-A** ($40, 42/100 reputation).
+4. **Examine Evidence**: Check the **Memory Evidence** panel to view the recalled historical records (e.g., Agent A's prior 14-hour delay).
+5. **Toggle Cold Start**: Check **Simulate Cold Start (Memory OFF)** and re-run. Observe how the decision flips to **ResearchAgent-A** ($40), illustrating the load-bearing effect of memory.
+6. **Review Escrow Action**: Inspect the prepared **Base Sepolia Escrow** payload locking funds across milestones.
+
+---
+
+## 8. API Reference
+
+### `POST /api/pact/agent`
+
+Evaluates a task against available agent candidates using Sibyl Memory and returns the optimal selection, risk assessment, payment strategy, and prepared Base Sepolia escrow payload.
+
+#### Request Example
 ```bash
 curl -X POST http://localhost:3000/api/pact/agent \
   -H "Content-Type: application/json" \
   -d '{
     "task": "Produce a market research report",
     "budget": 60,
-    "deadlineHours": 24
+    "deadlineHours": 24,
+    "simulateNoMemory": false
   }'
 ```
 
-Returns the structured decision JSON including selected counterparty, reputation score, risk level, payment terms, explainable rationale, load-bearing memory evidence, and prepared Base Sepolia escrow payload.
+#### Response Example
+```json
+{
+  "success": true,
+  "decision": {
+    "task": "Produce a market research report",
+    "budget": 60,
+    "deadlineHours": 24,
+    "selectedCounterparty": "ResearchAgent-B",
+    "reputation": 76,
+    "riskLevel": "LOW",
+    "price": 55,
+    "paymentStrategy": "MILESTONE_2",
+    "paymentTerms": {
+      "strategy": "MILESTONE_2",
+      "milestoneCount": 2,
+      "milestones": [
+        { "name": "Initial Deposit (50%)", "percentage": 50, "amount": 27.5 },
+        { "name": "Final Delivery (50%)", "percentage": 50, "amount": 27.5 }
+      ],
+      "summary": "2 Milestones: 50% upfront ($27.50), 50% upon delivery ($27.50)"
+    },
+    "reasoning": "ResearchAgent-B ($55) was selected over ResearchAgent-A ($40) due to reliable historical performance. Historical records in Sibyl Memory verify 8 on-time completions with an average quality score of 8.8/10.",
+    "whySection": {
+      "summary": "PACT analyzed 3 available agents using Sibyl Memory and selected ResearchAgent-B.",
+      "winnerRationale": "ResearchAgent-B ($55) was selected over ResearchAgent-A ($40) due to reliable historical performance.",
+      "comparisonPoints": [
+        "ResearchAgent-A ($40) is cheaper by $15, but carries HIGH RISK (42/100 reputation score from a previous 14-hour delay).",
+        "ResearchAgent-C ($85) is rated 94/100, but exceeds the $60 task budget by $25."
+      ],
+      "alternativesAnalysis": [
+        {
+          "name": "ResearchAgent-A",
+          "price": 40,
+          "reputation": 42,
+          "risk": "HIGH",
+          "status": "REJECTED_HIGH_RISK_ALTERNATIVE",
+          "reason": "Cheapest candidate ($40), but carries HIGH RISK (42/100) due to 14.0h past delay and 6.0/10 quality."
+        },
+        {
+          "name": "ResearchAgent-C",
+          "price": 85,
+          "reputation": 94,
+          "risk": "LOW",
+          "status": "REJECTED_OVER_BUDGET",
+          "reason": "Exceeds $60 budget by $25 (quote: $85)."
+        }
+      ]
+    },
+    "preparedEscrowAction": {
+      "action": "PREPARE_ESCROW",
+      "network": "Base Sepolia",
+      "chainId": 84532,
+      "contractAddress": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "beneficiaryAddress": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "counterpartyName": "ResearchAgent-B",
+      "totalAmount": 55,
+      "currency": "USD (0.000002 ETH/USD scale)",
+      "milestones": [
+        { "name": "Initial Deposit (50%)", "percentage": 50, "amount": 27.5 },
+        { "name": "Final Delivery (50%)", "percentage": 50, "amount": 27.5 }
+      ],
+      "ethEquivalent": "0.000110 ETH",
+      "readyToBroadcast": true
+    },
+    "isColdStart": false,
+    "memorySimulatedOff": false
+  }
+}
+```
 
 ---
 
-## Smart Contract Layer (`contracts/PACTEscrow.sol`)
+## 9. Base Sepolia Escrow Integration
 
-The escrow smart contract is located in [`contracts/PACTEscrow.sol`](file:///Users/mikasa05/pact/contracts/PACTEscrow.sol):
+PACT bridges off-chain memory with on-chain financial settlement:
+- **Contract**: [`contracts/PACTEscrow.sol`](file:///Users/mikasa05/pact/contracts/PACTEscrow.sol)
 - **Network**: Base Sepolia (Chain ID: `84532`)
-- **Native Currency**: ETH
-- **Functions**:
-  - `createEscrow(beneficiary, milestoneAmounts, commitmentId, counterpartyName)`: Creates and atomically funds a multi-milestone escrow.
-  - `fundEscrow(escrowId)`: Funds a created escrow.
-  - `releaseMilestone(escrowId, milestoneIndex)`: Payer approves disbursement of a specific milestone to the beneficiary.
-  - `disputeEscrow(escrowId, reason)`: Marks an escrow as disputed.
-  - `getEscrow(escrowId)` & `getMilestones(escrowId)`: View status and milestone flags.
-- **Security**: Checks-Effects-Interactions pattern, non-reentrancy protection, zero-address validation, and double-release prevention.
+- **Escrow Action Preparation**: PACT prepares the complete structured escrow payload (milestone splits, beneficiary wallet, ETH scaling) ready for transaction broadcast on Base Sepolia.
+- **Contract Architecture**:
+  - `createEscrow`: Creates and atomically funds a multi-milestone escrow.
+  - `releaseMilestone`: Allows payer to disburse specific milestones upon verified completion.
+  - `disputeEscrow`: Flags an escrow in dispute to prevent premature funds release.
+
+*(Note: In development and testing modes, PACT prepares and formats the structured escrow payload for Base Sepolia; transactions can be signed via connected testnet wallets without making unverified mainnet claims.)*
 
 ---
 
-## Fresh Session & Memory Differential Demo
+## 10. Verification & Test Suite
 
-### 1. With Memory (Session B Recalls Session A)
-- **Candidate**: `ResearchAgent-A`
-- **Recalled History**: 14 hours late delivery, 6/10 quality score.
-- **Reliability Score**: `42/100`
-- **Risk Level**: `HIGH RISK`
-- **Decision**: **3 MILESTONES** ($10 upfront / 20%, $20 milestone 1 / 40%, $20 final verification / 40%). Full upfront payment denied.
-- **On-Chain Action**: Base Sepolia escrow created locking 3 milestone disbursements.
+All test suites and production build checks pass:
 
-### 2. Without Memory (Simulate No Memory / Cold Start)
-- **Candidate**: `ResearchAgent-A`
-- **Recalled History**: *None (Memory recall disabled)*
-- **Reliability Score**: `50/100` (Baseline)
-- **Risk Level**: `UNKNOWN / COLD START`
-- **Decision**: **COLD-START TERMS** (30% initial deposit, 70% settlement).
+```bash
+# Run unit & integration test suites
+npm test
+```
+```
+====================================================
+       PACT CORE & SIBYL INTEGRATION TEST SUITE     
+====================================================
+17 PASSED, 0 FAILED
 
----
+====================================================
+       PACT AGENT WORKFLOW TEST SUITE (PHASE 5)     
+====================================================
+10 PASSED, 0 FAILED
 
-## Setup & Running Locally
+Total: 27/27 tests passed
+```
 
-### Prerequisites
-- Node.js `v20+` (v25 supported)
-- Python `3.10+` (v3.14 supported)
-- `uv` package manager (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Foundry `forge` (optional, for contract testing: `curl -L https://foundry.paradigm.xyz | bash`)
+```bash
+# Run Foundry smart contract tests
+npm run test:contracts
+```
+```
+Ran 8 tests for contracts/test/PACTEscrow.t.sol:PACTEscrowTest
+[PASS] test_CreateAndFundEscrow3Milestones()
+[PASS] test_CreateUnfundedAndFundLater()
+[PASS] test_ReleaseMilestonesSequentially()
+[PASS] test_RevertWhen_DoubleReleasingMilestone()
+[PASS] test_RevertWhen_FundingMismatch()
+[PASS] test_RevertWhen_NonPayerReleasesMilestone()
+[PASS] test_RevertWhen_ZeroAddressBeneficiary()
+[PASS] test_RevertWhen_ZeroMilestonesOrZeroAmount()
+Suite result: ok. 8 passed; 0 failed; 0 skipped
+```
 
-### Installation
-
-1. **Clone and enter directory:**
-   ```bash
-   git clone <repo-url> pact
-   cd pact
-   ```
-
-2. **Install Node dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Install Sibyl Memory SDK & CLI:**
-   ```bash
-   uv tool install 'sibyl-memory-cli[mcp]'
-   ```
-
-4. **Run the Automated Test Suites:**
-   ```bash
-   # Runs 17/17 core, memory, and escrow tests
-   npm test
-
-   # Runs 8/8 Foundry smart contract tests
-   npm run test:contracts
-   ```
-
-5. **Start the Development Server:**
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+```bash
+# Verify production build
+npm run build
+```
+```
+✓ Compiled successfully
+✓ Generating static pages (19/19)
+✓ Finalizing page optimization
+```
 
 ---
 
-## Base Sepolia Deployment
+## 11. Tech Stack
 
-To deploy the escrow contract to Base Sepolia:
-
-1. Copy `.env.example` to `.env.local` and add your deployment key:
-   ```bash
-   cp .env.example .env.local
-   ```
-   ```env
-   BASE_RPC_URL=https://sepolia.base.org
-   BASE_PRIVATE_KEY=0x...
-   ```
-
-2. Run the deployment script:
-   ```bash
-   npm run deploy:escrow
-   ```
-
-3. Add the deployed contract address to `.env.local`:
-   ```env
-   NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS=0x...
-   ```
+- **Framework**: Next.js 16 (Turbopack, App Router)
+- **Language**: TypeScript / React 19
+- **Long-Term Memory**: Sibyl Memory (`sibyl-memory-cli`, Python bridge)
+- **Storage Layer**: SQLite with FTS5 full-text indexing via Sibyl
+- **Smart Contracts**: Solidity `^0.8.20`
+- **Contract Tooling**: Foundry (`forge test`)
+- **Target Network**: Base Sepolia (Chain ID: `84532`)
 
 ---
 
-## 2–3 Minute Judging Demo Script
+## 12. Security & Secrets Management
 
-1. **Dashboard Overview (0:00 - 0:30)**:
-   - Point to the **Sibyl Memory: Connected** status indicator.
-   - Explain the core premise: AI agents have amnesia across sessions; PACT gives them persistent memory of counterparty commitments.
-2. **Trigger Guided Demo (0:30 - 1:30)**:
-   - Navigate to the **Guided Demo** tab.
-   - Click **Step 1**: Creates commitment for `ResearchAgent-A` (24h deadline, 8/10 quality, $10).
-   - Click **Step 2**: Records bad outcome (38h delivery, 14h late, 6/10 quality).
-   - Click **Step 4**: Clicks **Start Fresh Session** (demonstrates session ID changing with zero local memory).
-   - Click **Step 5 & 6**: PACT queries Sibyl Memory, recalls the 14h delay, and enforces a **3-Milestone Payment Strategy** ($10 / $20 / $20) with **HIGH RISK (42/100)**.
-   - Click **Step 7**: Creates **Base Sepolia Escrow** locking funds in 3 milestone disbursements.
-3. **Simulate No Memory Comparison (1:30 - 2:00)**:
-   - Show the side-by-side card comparing the decision **WITH MEMORY** vs **WITHOUT MEMORY**.
-   - Highlight the key insight: *"Persistent memory changes the economic controls applied to the agent."*
-4. **Sibyl Memory Audit (2:00 - 2:30)**:
-   - Open **Sibyl Memory** tab.
-   - Show raw persisted entities and execute an FTS5 search query (`ResearchAgent-A`) returning matching entities and journal logs directly from `~/.sibyl-memory/memory.db`.
+- **Environment Isolation**: All sensitive private keys and RPC credentials are kept strictly out of git via `.gitignore`.
+- **Configuration Templates**: [`.env.example`](file:///Users/mikasa05/pact/.env.example) contains safe placeholders for local testing and configuration.
+- **Smart Contract Safety**: `PACTEscrow.sol` enforces the Checks-Effects-Interactions pattern, non-reentrancy modifiers, zero-address checks, and strict caller authorization.
+- **Testnet Scope**: Blockchain operations are strictly scoped to the Base Sepolia testnet.
